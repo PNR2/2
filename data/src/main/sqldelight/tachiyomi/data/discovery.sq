@@ -1,0 +1,65 @@
+-- Cache for RSS news feeds
+CREATE TABLE rss_news_article (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    link TEXT NOT NULL,
+    description TEXT,
+    image_url TEXT,
+    publication_date INTEGER NOT NULL,
+    source_name TEXT NOT NULL,
+    is_read INTEGER AS Boolean DEFAULT 0
+);
+
+-- Cache for MAL Discovery / Seasonal / Auto-fetched entries
+CREATE TABLE mal_discovery_entry (
+    mal_id INTEGER NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    cover_url TEXT,
+    synopsis TEXT,
+    score REAL,
+    start_date TEXT,
+    is_seasonal INTEGER AS Boolean DEFAULT 1,
+    last_synced INTEGER NOT NULL
+);
+
+-- Junction table linking a MAL entry to resolved extension sources
+CREATE TABLE mal_extension_match (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    mal_id INTEGER NOT NULL,
+    source_id INTEGER NOT NULL,
+    manga_id INTEGER NOT NULL,
+    manga_url TEXT NOT NULL,
+    FOREIGN KEY(mal_id) REFERENCES mal_discovery_entry(mal_id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_match_mal_id ON mal_extension_match(mal_id);
+
+-- Query helpers for UI & Background Workers
+
+selectAllNews:
+SELECT *
+FROM rss_news_article
+ORDER BY publication_date DESC;
+
+insertNewsArticle:
+INSERT OR REPLACE INTO rss_news_article(title, link, description, image_url, publication_date, source_name, is_read)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+selectAllSeasonalManga:
+SELECT *
+FROM mal_discovery_entry
+WHERE is_seasonal = 1
+ORDER BY start_date DESC;
+
+insertMalEntry:
+INSERT OR REPLACE INTO mal_discovery_entry(mal_id, title, cover_url, synopsis, score, start_date, is_seasonal, last_synced)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+getMatchesForMalId:
+SELECT *
+FROM mal_extension_match
+WHERE mal_id = ?;
+
+insertExtensionMatch:
+INSERT OR REPLACE INTO mal_extension_match(mal_id, source_id, manga_id, manga_url)
+VALUES (?, ?, ?, ?);
