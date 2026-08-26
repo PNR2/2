@@ -1,3 +1,5 @@
+import kotlin.Boolean;
+
 -- Cache for RSS news feeds
 CREATE TABLE rss_news_article (
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
