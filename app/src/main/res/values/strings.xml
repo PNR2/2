@@ -6,7 +6,7 @@
 
     <!-- Generic standard strings for Android manifest -->
     <string name="mihon_description">MUSYomi - Custom Manga Reader</string>
-    
+
     <!-- Shortcut strings -->
     <string name="shortcut_library">Library</string>
     <string name="shortcut_recent">Recent</string>
