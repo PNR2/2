@@ -47,7 +47,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.navigator.Navigator
+import cafe.adriel.voyager.navigator.LocalNavigator
+    import cafe.adriel.voyager.navigator.Navigator
+import cafe.adriel.voyager.navigator.currentOrThrow
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import coil3.compose.AsyncImage
 import eu.kanade.tachiyomi.data.discovery.DiscoverySyncWorker
@@ -55,6 +57,7 @@ import eu.kanade.tachiyomi.data.discovery.MalDiscoveryItem
 import eu.kanade.tachiyomi.data.discovery.MalDiscoveryRepository
 import eu.kanade.tachiyomi.data.discovery.RssNewsItem
 import eu.kanade.tachiyomi.data.discovery.RssNewsRepository
+import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -157,6 +160,8 @@ object NewsTab : VoyagerTab {
     @Composable
     private fun SeasonalGrid(mangaList: List<MalDiscoveryItem>) {
         val context = LocalContext.current
+        val navigator = LocalNavigator.currentOrThrow // Voyager Navigator to access Mihon's native screens
+
         if (mangaList.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
@@ -166,7 +171,7 @@ object NewsTab : VoyagerTab {
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Fixed(2), // 2 items per row
+                columns = GridCells.Fixed(2),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -176,9 +181,15 @@ object NewsTab : VoyagerTab {
                     MangaCard(
                         manga = manga,
                         onClick = {
-                            val url = "https://myanimelist.net/manga/${manga.malId}"
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                            context.startActivity(intent)
+                            if (manga.sourceId != null) {
+                                // AUTOMATION KICKS IN: Push directly to Mihon's Global Search for the matched title!
+                                navigator.push(GlobalSearchScreen(manga.title))
+                            } else {
+                                // Fallback to MyAnimeList web browser if no extension match was found
+                                val url = "https://myanimelist.net/manga/${manga.malId}"
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                context.startActivity(intent)
+                            }
                         },
                     )
                 }
@@ -263,11 +274,21 @@ object NewsTab : VoyagerTab {
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = if (manga.score != null) "⭐ ${manga.score}" else "No Score",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    
+                    // Show our UI that a match was successfully made in the background!
+                    if (manga.sourceId != null) {
+                        Text(
+                            text = "🔗 Linked to Extension",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    } else {
+                        Text(
+                            text = if (manga.score != null) "⭐ ${manga.score}" else "No Score",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
         }
