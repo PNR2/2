@@ -19,7 +19,6 @@ import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,12 +27,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
@@ -46,9 +42,9 @@ import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import coil3.compose.AsyncImage
 import eu.kanade.presentation.util.Tab
-import eu.kanade.tachiyomi.data.discovery.RssNewsFetcher
+import eu.kanade.tachiyomi.data.discovery.DiscoverySyncWorker
 import eu.kanade.tachiyomi.data.discovery.RssNewsItem
-import kotlinx.coroutines.launch
+import eu.kanade.tachiyomi.data.discovery.RssNewsRepository
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -66,7 +62,7 @@ object NewsTab : Tab {
 
             return remember {
                 TabOptions(
-                    index = 10u, // Assigning a high index so it loads at the end of the bottom bar
+                    index = 10u,
                     title = title,
                     icon = icon,
                 )
@@ -74,46 +70,29 @@ object NewsTab : Tab {
         }
 
     override suspend fun onReselect(navigator: Navigator) {
-        // TODO: Handle double-tap tab behavior later (like scrolling to the top of the news feed)
+        // TODO: Handle double-tap tab behavior
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
         val context = LocalContext.current
-        val scope = rememberCoroutineScope()
+        val repository = remember { RssNewsRepository() }
 
-        // State variables to hold our data and loading status
-        var articles by remember { mutableStateOf<List<RssNewsItem>>(emptyList()) }
-        var isRefreshing by remember { mutableStateOf(true) }
-
-        // The function that triggers the network fetch
-        val fetchNews = {
-            scope.launch {
-                isRefreshing = true
-                try {
-                    val fetcher = RssNewsFetcher()
-                    articles = fetcher.fetchNews(
-                        "https://www.animenewsnetwork.com/news/rss.xml",
-                        "Anime News Network",
-                    )
-                } finally {
-                    isRefreshing = false
-                }
-            }
-        }
-
-        // Fetch the news immediately when the tab is opened
-        LaunchedEffect(Unit) {
-            fetchNews()
-        }
+        // Reactive UI! This instantly loads from the database and updates when the db changes.
+        val articles by repository.subscribeToNews().collectAsState(initial = emptyList())
 
         Scaffold(
             topBar = {
                 TopAppBar(
                     title = { Text("Anime & Manga News") },
                     actions = {
-                        IconButton(onClick = { fetchNews() }) {
+                        IconButton(
+                            onClick = {
+                                // Tells the background worker to fetch new articles instantly
+                                DiscoverySyncWorker.startNow(context)
+                            },
+                        ) {
                             Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
                         }
                     },
@@ -125,11 +104,13 @@ object NewsTab : Tab {
                     .fillMaxSize()
                     .padding(paddingValues),
             ) {
-                if (isRefreshing && articles.isEmpty()) {
-                    // Show a loading spinner in the center if we have no data yet
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                if (articles.isEmpty()) {
+                    Text(
+                        text = "Hit the refresh button to pull the latest news!",
+                        modifier = Modifier.align(Alignment.Center),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 } else {
-                    // Display the list of articles
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(16.dp),
@@ -159,7 +140,6 @@ object NewsTab : Tab {
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
             Column {
-                // If there's an image, load it using Coil 3
                 if (!article.imageUrl.isNullOrEmpty()) {
                     AsyncImage(
                         model = article.imageUrl,
