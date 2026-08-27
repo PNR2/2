@@ -1,3 +1,5 @@
+@file:Suppress("ktlint:standard:max-line-length")
+
 package eu.kanade.tachiyomi.data.discovery
 
 import android.content.ContentValues
@@ -11,7 +13,9 @@ import uy.kohesive.injekt.api.get
 
 // NEW: Our custom sorting options
 enum class DiscoverySort {
-    LATEST, SCORE, TITLE
+    LATEST,
+    SCORE,
+    TITLE,
 }
 
 class MalDiscoveryRepository {
@@ -19,10 +23,10 @@ class MalDiscoveryRepository {
     companion object {
         private val context: Context = Injekt.get()
         private val dbHelper = DiscoveryDatabaseHelper(context)
-        
+
         // NEW: Native SharedPreferences to store the ON/OFF toggle
         private val prefs = context.getSharedPreferences("discovery_prefs", Context.MODE_PRIVATE)
-        
+
         private val mangaFlowState = MutableStateFlow<List<MalDiscoveryItem>>(emptyList())
         private var currentSort = DiscoverySort.LATEST
 
@@ -47,14 +51,14 @@ class MalDiscoveryRepository {
 
         fun refreshFlow() {
             val db = dbHelper.readableDatabase
-            
+
             // dynamically change the SQL query based on user preference
             val orderBy = when (currentSort) {
                 DiscoverySort.LATEST -> "start_date DESC"
                 DiscoverySort.SCORE -> "score DESC"
                 DiscoverySort.TITLE -> "title ASC"
             }
-            
+
             val cursor = db.rawQuery(
                 "SELECT * FROM mal_discovery_entry WHERE is_seasonal = 1 ORDER BY $orderBy",
                 null,
