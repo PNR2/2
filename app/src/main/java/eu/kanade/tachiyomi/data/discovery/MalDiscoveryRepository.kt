@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.data.discovery
 
 import android.content.ContentValues
+import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -8,20 +9,54 @@ import kotlinx.coroutines.flow.asStateFlow
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
+// NEW: Our custom sorting options
+enum class DiscoverySort {
+    LATEST, SCORE, TITLE
+}
+
 class MalDiscoveryRepository {
 
     companion object {
-        private val dbHelper = DiscoveryDatabaseHelper(Injekt.get())
+        private val context: Context = Injekt.get()
+        private val dbHelper = DiscoveryDatabaseHelper(context)
+        
+        // NEW: Native SharedPreferences to store the ON/OFF toggle
+        private val prefs = context.getSharedPreferences("discovery_prefs", Context.MODE_PRIVATE)
+        
         private val mangaFlowState = MutableStateFlow<List<MalDiscoveryItem>>(emptyList())
+        private var currentSort = DiscoverySort.LATEST
 
         init {
             refreshFlow()
         }
 
+        // NEW: Toggle Settings logic
+        fun isAutomationEnabled(): Boolean {
+            return prefs.getBoolean("automation_enabled", true)
+        }
+
+        fun setAutomationEnabled(enabled: Boolean) {
+            prefs.edit().putBoolean("automation_enabled", enabled).apply()
+        }
+
+        // NEW: Sorting logic
+        fun setSortMethod(sort: DiscoverySort) {
+            currentSort = sort
+            refreshFlow()
+        }
+
         fun refreshFlow() {
             val db = dbHelper.readableDatabase
+            
+            // dynamically change the SQL query based on user preference
+            val orderBy = when (currentSort) {
+                DiscoverySort.LATEST -> "start_date DESC"
+                DiscoverySort.SCORE -> "score DESC"
+                DiscoverySort.TITLE -> "title ASC"
+            }
+            
             val cursor = db.rawQuery(
-                "SELECT * FROM mal_discovery_entry WHERE is_seasonal = 1 ORDER BY start_date DESC",
+                "SELECT * FROM mal_discovery_entry WHERE is_seasonal = 1 ORDER BY $orderBy",
                 null,
             )
             val list = mutableListOf<MalDiscoveryItem>()
