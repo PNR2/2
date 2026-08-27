@@ -7,8 +7,8 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import eu.kanade.tachiyomi.util.system.logcat
 import logcat.LogPriority
+import logcat.logcat
 import java.util.concurrent.TimeUnit
 
 /**
