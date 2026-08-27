@@ -35,7 +35,6 @@ class DiscoverySyncWorker(
     override suspend fun doWork(): Result {
         logcat(LogPriority.INFO) { "MUSYomi: Starting Background Sync..." }
 
-        // 1. Fetch RSS News (Wrapped in its own safety net)
         try {
             val newsUrl = "https://www.animenewsnetwork.com/news/rss.xml"
             val fetchedNews = rssFetcher.fetchNews(newsUrl, "Anime News Network")
@@ -46,7 +45,6 @@ class DiscoverySyncWorker(
             logcat(LogPriority.ERROR) { "MUSYomi: RSS News Fetch Failed" }
         }
 
-        // 2. Fetch MAL Seasonal Manga (Wrapped in its own safety net)
         try {
             val fetchedManga = malFetcher.fetchSeasonalManga()
             if (fetchedManga.isNotEmpty()) {
@@ -57,10 +55,9 @@ class DiscoverySyncWorker(
                     var matchedSourceId: Long? = null
                     var matchedMangaUrl: String? = null
 
-                    // Only run automation if the user has it enabled and an extension is installed!
-                    if (activeSource != null && malRepository.isAutomationEnabled()) {
+                    // Accessing static repository companion check directly
+                    if (activeSource != null && MalDiscoveryRepository.isAutomationEnabled()) {
                         try {
-                            // Use the extension's specific filter list so it doesn't crash
                             val filters = activeSource.getFilterList()
                             val searchPage = activeSource.getSearchManga(1, manga.title, filters)
                             val topMatch = searchPage.mangas.firstOrNull()
@@ -69,7 +66,7 @@ class DiscoverySyncWorker(
                                 matchedSourceId = activeSource.id
                                 matchedMangaUrl = topMatch.url
                             }
-                            delay(1000) // Polite delay
+                            delay(1000)
                         } catch (e: Exception) {
                             logcat(LogPriority.ERROR) { "MUSYomi: Automation search failed for ${manga.title}" }
                         }
@@ -97,7 +94,6 @@ class DiscoverySyncWorker(
                 .addTag(TAG)
                 .build()
 
-            // REPLACE ensures that if it gets stuck, pressing refresh forces it to restart!
             WorkManager.getInstance(context).enqueueUniqueWork(
                 TAG + "_MANUAL",
                 ExistingWorkPolicy.REPLACE,
