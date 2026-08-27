@@ -1,5 +1,3 @@
-@file:Suppress("ktlint:standard:max-line-length")
-
 package eu.kanade.tachiyomi.data.discovery
 
 import android.content.ContentValues
@@ -30,9 +28,9 @@ class MalDiscoveryRepository {
 
             if (cursor.moveToFirst()) {
                 do {
-                    val scoreIndex = cursor.getColumnIndexOrThrow("score")
-                    val sourceIdIndex = cursor.getColumnIndexOrThrow("source_id")
-                    val mangaUrlIndex = cursor.getColumnIndexOrThrow("manga_url")
+                    val scoreIdx = cursor.getColumnIndexOrThrow("score")
+                    val sourceIdIdx = cursor.getColumnIndexOrThrow("source_id")
+                    val mangaUrlIdx = cursor.getColumnIndexOrThrow("manga_url")
 
                     list.add(
                         MalDiscoveryItem(
@@ -40,11 +38,11 @@ class MalDiscoveryRepository {
                             title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
                             coverUrl = cursor.getString(cursor.getColumnIndexOrThrow("cover_url")),
                             synopsis = cursor.getString(cursor.getColumnIndexOrThrow("synopsis")),
-                            score = if (cursor.isNull(scoreIndex)) null else cursor.getDouble(scoreIndex),
+                            score = if (cursor.isNull(scoreIdx)) null else cursor.getDouble(scoreIdx),
                             startDate = cursor.getString(cursor.getColumnIndexOrThrow("start_date")),
                             isSeasonal = cursor.getInt(cursor.getColumnIndexOrThrow("is_seasonal")) == 1,
-                            sourceId = if (cursor.isNull(sourceIdIndex)) null else cursor.getLong(sourceIdIndex),
-                            mangaUrl = if (cursor.isNull(mangaUrlIndex)) null else cursor.getString(mangaUrlIndex),
+                            sourceId = if (cursor.isNull(sourceIdIdx)) null else cursor.getLong(sourceIdIdx),
+                            mangaUrl = if (cursor.isNull(mangaUrlIdx)) null else cursor.getString(mangaUrlIdx),
                         ),
                     )
                 } while (cursor.moveToNext())
