@@ -96,7 +96,7 @@ class DiscoverySyncWorker(
             val request = OneTimeWorkRequestBuilder<DiscoverySyncWorker>()
                 .addTag(TAG)
                 .build()
-            
+
             // REPLACE ensures that if it gets stuck, pressing refresh forces it to restart!
             WorkManager.getInstance(context).enqueueUniqueWork(
                 TAG + "_MANUAL",
