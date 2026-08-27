@@ -20,19 +20,30 @@ class DiscoverySyncWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
 
+    // Instantiate our new fetcher
+    private val rssFetcher = RssNewsFetcher()
+
     override suspend fun doWork(): Result {
         logcat(LogPriority.INFO) { "MUSYomi: Starting Background Sync for MAL and RSS..." }
 
-        try {
-            // TODO: Step 1 - Fetch MyAnimeList Seasonal Data via Network
-            // TODO: Step 2 - Fetch RSS News XML via Network
-            // TODO: Step 3 - Insert results into discovery.sq database tables
+        return try {
+            // Fetch live news from Anime News Network
+            val newsUrl = "https://www.animenewsnetwork.com/news/rss.xml"
+            val fetchedNews = rssFetcher.fetchNews(newsUrl, "Anime News Network")
+            
+            // Log the titles to guarantee our parser is working before we touch the database
+            logcat(LogPriority.INFO) { "MUSYomi: Successfully fetched ${fetchedNews.size} articles." }
+            fetchedNews.take(5).forEach { article ->
+                logcat(LogPriority.INFO) { "MUSYomi Headline: ${article.title}" }
+            }
+
+            // TODO: Step 3 - Insert results into discovery.sq database tables (Next step!)
 
             logcat(LogPriority.INFO) { "MUSYomi: Background Sync Completed Successfully." }
-            return Result.success()
+            Result.success()
         } catch (e: Exception) {
             logcat(LogPriority.ERROR) { "MUSYomi: Background Sync Failed - ${e.message}" }
-            return Result.failure()
+            Result.failure()
         }
     }
 
