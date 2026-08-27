@@ -30,7 +30,7 @@ class DiscoverySyncWorker(
             // Fetch live news from Anime News Network
             val newsUrl = "https://www.animenewsnetwork.com/news/rss.xml"
             val fetchedNews = rssFetcher.fetchNews(newsUrl, "Anime News Network")
-            
+
             // Log the titles to guarantee our parser is working before we touch the database
             logcat(LogPriority.INFO) { "MUSYomi: Successfully fetched ${fetchedNews.size} articles." }
             fetchedNews.take(5).forEach { article ->
