@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
-// NEW: Our custom sorting options
 enum class DiscoverySort {
     LATEST,
     SCORE,
@@ -22,11 +21,8 @@ enum class DiscoverySort {
 class MalDiscoveryRepository {
 
     companion object {
-        // Changed to Application to satisfy the database helper!
         private val application: Application = Injekt.get()
         private val dbHelper = DiscoveryDatabaseHelper(application)
-
-        // NEW: Native SharedPreferences to store the ON/OFF toggle
         private val prefs = application.getSharedPreferences("discovery_prefs", Context.MODE_PRIVATE)
 
         private val mangaFlowState = MutableStateFlow<List<MalDiscoveryItem>>(emptyList())
@@ -36,7 +32,6 @@ class MalDiscoveryRepository {
             refreshFlow()
         }
 
-        // NEW: Toggle Settings logic
         fun isAutomationEnabled(): Boolean {
             return prefs.getBoolean("automation_enabled", true)
         }
@@ -45,7 +40,6 @@ class MalDiscoveryRepository {
             prefs.edit().putBoolean("automation_enabled", enabled).apply()
         }
 
-        // NEW: Sorting logic
         fun setSortMethod(sort: DiscoverySort) {
             currentSort = sort
             refreshFlow()
@@ -53,8 +47,6 @@ class MalDiscoveryRepository {
 
         fun refreshFlow() {
             val db = dbHelper.readableDatabase
-
-            // dynamically change the SQL query based on user preference
             val orderBy = when (currentSort) {
                 DiscoverySort.LATEST -> "start_date DESC"
                 DiscoverySort.SCORE -> "score DESC"
