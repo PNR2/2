@@ -55,7 +55,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.Navigator
@@ -97,13 +96,14 @@ object NewsTab : VoyagerTab {
         val seasonalManga by malRepo.subscribeToSeasonalManga().collectAsState(initial = emptyList())
 
         val workManager = remember { WorkManager.getInstance(context) }
-        val workInfos by workManager.getWorkInfosByTagFlow(DiscoverySyncWorker.TAG).collectAsState(initial = emptyList())
-        val isRefreshing = workInfos.any { it.state == WorkInfo.State.RUNNING }
+        val workInfos by workManager.getWorkInfosByTagFlow(
+            DiscoverySyncWorker.TAG,
+        ).collectAsState(initial = emptyList())
+        val isRefreshing = workInfos.any { it.state.isFinished.not() }
 
         var selectedTabIndex by remember { mutableIntStateOf(0) }
         val tabs = listOf("News", "Seasonal")
 
-        // State for our new Filter Menu
         var showMenu by remember { mutableStateOf(false) }
         var isAutomationOn by remember { mutableStateOf(MalDiscoveryRepository.isAutomationEnabled()) }
 
@@ -113,7 +113,6 @@ object NewsTab : VoyagerTab {
                     TopAppBar(
                         title = { Text("Discovery Hub") },
                         actions = {
-                            // The new Filter/Sort Menu
                             Box {
                                 IconButton(onClick = { showMenu = true }) {
                                     Icon(Icons.Outlined.FilterList, contentDescription = "Filter Options")
@@ -158,7 +157,6 @@ object NewsTab : VoyagerTab {
                                 }
                             }
 
-                            // The Refresh Spinner/Button
                             if (isRefreshing) {
                                 CircularProgressIndicator(
                                     modifier = Modifier
@@ -169,7 +167,11 @@ object NewsTab : VoyagerTab {
                             } else {
                                 IconButton(
                                     onClick = {
-                                        Toast.makeText(context, "Searching for Seasonal Manga...", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(
+                                            context,
+                                            "Searching for Seasonal Manga...",
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
                                         DiscoverySyncWorker.startNow(context)
                                     },
                                 ) {
@@ -235,7 +237,6 @@ object NewsTab : VoyagerTab {
 
     @Composable
     private fun SeasonalGrid(mangaList: List<MalDiscoveryItem>) {
-        val context = LocalContext.current
         val navigator = LocalNavigator.currentOrThrow
 
         if (mangaList.isEmpty()) {
@@ -262,7 +263,7 @@ object NewsTab : VoyagerTab {
                             } else {
                                 val url = "https://myanimelist.net/manga/${manga.malId}"
                                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                context.startActivity(intent)
+                                navigator.context.startActivity(intent)
                             }
                         },
                     )
