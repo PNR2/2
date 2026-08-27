@@ -1,47 +1,63 @@
 {
   "project_info": {
-    "project_number": "82031285239",
-    "project_id": "mihonapp",
-    "storage_bucket": "mihonapp.appspot.com"
+    "project_number": "000000000000",
+    "project_id": "musyomi-app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:82031285239:android:336ed6dceef55c357594f2",
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
         "android_client_info": {
-          "package_name": "app.mihon"
+          "package_name": "com.musyomi.app"
         }
       },
       "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyDTvOxBQnuXADx5isKxoynPG0nlAO8bQbk"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
+      "api_key": [{"current_key": "MOCK_API_KEY"}],
+      "services": {"appinvite_service": {"other_platform_oauth_client": []}}
     },
     {
       "client_info": {
-        "mobilesdk_app_id": "1:82031285239:android:b7440cbdd0d33c9d7594f2",
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000001",
         "android_client_info": {
-          "package_name": "app.mihon.debug"
+          "package_name": "com.musyomi.app.debug"
         }
       },
       "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyDTvOxBQnuXADx5isKxoynPG0nlAO8bQbk"
+      "api_key": [{"current_key": "MOCK_API_KEY"}],
+      "services": {"appinvite_service": {"other_platform_oauth_client": []}}
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000002",
+        "android_client_info": {
+          "package_name": "com.musyomi.app.foss"
         }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
+      },
+      "oauth_client": [],
+      "api_key": [{"current_key": "MOCK_API_KEY"}],
+      "services": {"appinvite_service": {"other_platform_oauth_client": []}}
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000003",
+        "android_client_info": {
+          "package_name": "com.musyomi.app.benchmark"
         }
-      }
+      },
+      "oauth_client": [],
+      "api_key": [{"current_key": "MOCK_API_KEY"}],
+      "services": {"appinvite_service": {"other_platform_oauth_client": []}}
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000004",
+        "android_client_info": {
+          "package_name": "com.musyomi.app.dev"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [{"current_key": "MOCK_API_KEY"}],
+      "services": {"appinvite_service": {"other_platform_oauth_client": []}}
     }
   ],
   "configuration_version": "1"
