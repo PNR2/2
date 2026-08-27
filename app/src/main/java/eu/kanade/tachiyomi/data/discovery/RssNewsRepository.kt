@@ -40,7 +40,7 @@ class DiscoveryDatabaseHelper(
                 "is_seasonal INTEGER DEFAULT 1, " +
                 "last_synced INTEGER NOT NULL, " +
                 "source_id INTEGER, " + // NEW AUTOMATION COLUMN
-                "manga_url TEXT)",      // NEW AUTOMATION COLUMN
+                "manga_url TEXT)", // NEW AUTOMATION COLUMN
         )
     }
 
