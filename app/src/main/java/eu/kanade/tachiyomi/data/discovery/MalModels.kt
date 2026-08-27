@@ -47,4 +47,7 @@ data class MalDiscoveryItem(
     val score: Double?,
     val startDate: String?,
     val isSeasonal: Boolean,
+    // NEW: Fields for the Automation Engine
+    val sourceId: Long? = null,
+    val mangaUrl: String? = null,
 )
