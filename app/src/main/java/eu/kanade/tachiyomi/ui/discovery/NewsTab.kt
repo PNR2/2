@@ -4,6 +4,7 @@ package eu.kanade.tachiyomi.ui.discovery
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -21,10 +23,15 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Article
+import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,11 +55,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import coil3.compose.AsyncImage
+import eu.kanade.tachiyomi.data.discovery.DiscoverySort
 import eu.kanade.tachiyomi.data.discovery.DiscoverySyncWorker
 import eu.kanade.tachiyomi.data.discovery.MalDiscoveryItem
 import eu.kanade.tachiyomi.data.discovery.MalDiscoveryRepository
@@ -63,9 +74,6 @@ import java.util.Date
 import java.util.Locale
 import eu.kanade.presentation.util.Tab as VoyagerTab
 
-/**
- * The unified UI screen for Discovery (News + Seasonal Manga).
- */
 object NewsTab : VoyagerTab {
 
     override val options: TabOptions
@@ -88,8 +96,16 @@ object NewsTab : VoyagerTab {
         val articles by rssRepo.subscribeToNews().collectAsState(initial = emptyList())
         val seasonalManga by malRepo.subscribeToSeasonalManga().collectAsState(initial = emptyList())
 
+        val workManager = remember { WorkManager.getInstance(context) }
+        val workInfos by workManager.getWorkInfosByTagFlow(DiscoverySyncWorker.TAG).collectAsState(initial = emptyList())
+        val isRefreshing = workInfos.any { it.state == WorkInfo.State.RUNNING }
+
         var selectedTabIndex by remember { mutableIntStateOf(0) }
         val tabs = listOf("News", "Seasonal")
+
+        // State for our new Filter Menu
+        var showMenu by remember { mutableStateOf(false) }
+        var isAutomationOn by remember { mutableStateOf(MalDiscoveryRepository.isAutomationEnabled()) }
 
         Scaffold(
             topBar = {
@@ -97,8 +113,68 @@ object NewsTab : VoyagerTab {
                     TopAppBar(
                         title = { Text("Discovery Hub") },
                         actions = {
-                            IconButton(onClick = { DiscoverySyncWorker.startNow(context) }) {
-                                Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
+                            // The new Filter/Sort Menu
+                            Box {
+                                IconButton(onClick = { showMenu = true }) {
+                                    Icon(Icons.Outlined.FilterList, contentDescription = "Filter Options")
+                                }
+                                DropdownMenu(
+                                    expanded = showMenu,
+                                    onDismissRequest = { showMenu = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Sort by Latest") },
+                                        onClick = {
+                                            MalDiscoveryRepository.setSortMethod(DiscoverySort.LATEST)
+                                            showMenu = false
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Sort by Score") },
+                                        onClick = {
+                                            MalDiscoveryRepository.setSortMethod(DiscoverySort.SCORE)
+                                            showMenu = false
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Sort by Title") },
+                                        onClick = {
+                                            MalDiscoveryRepository.setSortMethod(DiscoverySort.TITLE)
+                                            showMenu = false
+                                        },
+                                    )
+                                    HorizontalDivider()
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(if (isAutomationOn) "Turn Off Auto-Link" else "Turn On Auto-Link")
+                                        },
+                                        onClick = {
+                                            val newState = !isAutomationOn
+                                            MalDiscoveryRepository.setAutomationEnabled(newState)
+                                            isAutomationOn = newState
+                                            showMenu = false
+                                        },
+                                    )
+                                }
+                            }
+
+                            // The Refresh Spinner/Button
+                            if (isRefreshing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier
+                                        .padding(end = 16.dp, start = 8.dp)
+                                        .size(24.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                IconButton(
+                                    onClick = {
+                                        Toast.makeText(context, "Searching for Seasonal Manga...", Toast.LENGTH_SHORT).show()
+                                        DiscoverySyncWorker.startNow(context)
+                                    },
+                                ) {
+                                    Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
+                                }
                             }
                         },
                     )
@@ -160,7 +236,7 @@ object NewsTab : VoyagerTab {
     @Composable
     private fun SeasonalGrid(mangaList: List<MalDiscoveryItem>) {
         val context = LocalContext.current
-        val navigator = LocalNavigator.currentOrThrow // Voyager Navigator to access Mihon's native screens
+        val navigator = LocalNavigator.currentOrThrow
 
         if (mangaList.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -182,10 +258,8 @@ object NewsTab : VoyagerTab {
                         manga = manga,
                         onClick = {
                             if (manga.sourceId != null) {
-                                // AUTOMATION KICKS IN: Push directly to Mihon's Global Search for the matched title!
                                 navigator.push(GlobalSearchScreen(manga.title))
                             } else {
-                                // Fallback to MyAnimeList web browser if no extension match was found
                                 val url = "https://myanimelist.net/manga/${manga.malId}"
                                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                                 context.startActivity(intent)
@@ -275,7 +349,6 @@ object NewsTab : VoyagerTab {
                     )
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    // Show our UI that a match was successfully made in the background!
                     if (manga.sourceId != null) {
                         Text(
                             text = "🔗 Linked to Extension",
