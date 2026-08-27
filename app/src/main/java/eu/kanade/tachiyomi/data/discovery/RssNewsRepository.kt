@@ -57,7 +57,8 @@ class RssNewsRepository {
 
     companion object {
         private val dbHelper = DiscoveryDatabaseHelper(Injekt.get())
-        private val _newsFlow = MutableStateFlow<List<RssNewsItem>>(emptyList())
+        // Renamed to remove the underscore and satisfy ktlint
+        private val newsFlowState = MutableStateFlow<List<RssNewsItem>>(emptyList())
 
         init {
             refreshFlow()
@@ -94,7 +95,7 @@ class RssNewsRepository {
                 } while (cursor.moveToNext())
             }
             cursor.close()
-            _newsFlow.value = list
+            newsFlowState.value = list
         }
     }
 
@@ -127,6 +128,6 @@ class RssNewsRepository {
     }
 
     fun subscribeToNews(): StateFlow<List<RssNewsItem>> {
-        return _newsFlow.asStateFlow()
+        return newsFlowState.asStateFlow()
     }
 }
