@@ -14,7 +14,7 @@ import uy.kohesive.injekt.api.get
 
 class DiscoveryDatabaseHelper(
     app: Application,
-) : SQLiteOpenHelper(app, "musyomi_discovery.db", null, 1) {
+) : SQLiteOpenHelper(app, "musyomi_discovery.db", null, 2) { // UPGRADED TO VERSION 2
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -38,7 +38,9 @@ class DiscoveryDatabaseHelper(
                 "score REAL, " +
                 "start_date TEXT, " +
                 "is_seasonal INTEGER DEFAULT 1, " +
-                "last_synced INTEGER NOT NULL)",
+                "last_synced INTEGER NOT NULL, " +
+                "source_id INTEGER, " + // NEW AUTOMATION COLUMN
+                "manga_url TEXT)",      // NEW AUTOMATION COLUMN
         )
     }
 
@@ -47,6 +49,7 @@ class DiscoveryDatabaseHelper(
         oldVersion: Int,
         newVersion: Int,
     ) {
+        // Wipes the old cache and recreates it with the new columns
         db.execSQL("DROP TABLE IF EXISTS rss_news_article")
         db.execSQL("DROP TABLE IF EXISTS mal_discovery_entry")
         onCreate(db)
@@ -57,8 +60,6 @@ class RssNewsRepository {
 
     companion object {
         private val dbHelper = DiscoveryDatabaseHelper(Injekt.get())
-
-        // Renamed to remove the underscore and satisfy ktlint
         private val newsFlowState = MutableStateFlow<List<RssNewsItem>>(emptyList())
 
         init {
