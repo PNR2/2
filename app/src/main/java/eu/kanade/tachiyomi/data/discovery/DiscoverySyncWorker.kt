@@ -20,24 +20,23 @@ class DiscoverySyncWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
 
-    // Instantiate our new fetcher
     private val rssFetcher = RssNewsFetcher()
+    private val repository = RssNewsRepository()
 
     override suspend fun doWork(): Result {
         logcat(LogPriority.INFO) { "MUSYomi: Starting Background Sync for MAL and RSS..." }
 
         return try {
-            // Fetch live news from Anime News Network
             val newsUrl = "https://www.animenewsnetwork.com/news/rss.xml"
             val fetchedNews = rssFetcher.fetchNews(newsUrl, "Anime News Network")
 
-            // Log the titles to guarantee our parser is working before we touch the database
-            logcat(LogPriority.INFO) { "MUSYomi: Successfully fetched ${fetchedNews.size} articles." }
-            fetchedNews.take(5).forEach { article ->
-                logcat(LogPriority.INFO) { "MUSYomi Headline: ${article.title}" }
+            // Save the downloaded articles straight into the SQLite Database!
+            if (fetchedNews.isNotEmpty()) {
+                repository.insertNews(fetchedNews)
+                logcat(LogPriority.INFO) { "MUSYomi: Successfully saved ${fetchedNews.size} articles to database." }
             }
 
-            // TODO: Step 3 - Insert results into discovery.sq database tables (Next step!)
+            // TODO: Step 4 - Fetch MyAnimeList Seasonal Data via Network
 
             logcat(LogPriority.INFO) { "MUSYomi: Background Sync Completed Successfully." }
             Result.success()
@@ -50,9 +49,6 @@ class DiscoverySyncWorker(
     companion object {
         private const val TAG = "DiscoverySyncWorker"
 
-        /**
-         * Trigger a one-time immediate sync (Useful for pull-to-refresh in the UI)
-         */
         fun startNow(context: Context) {
             val request = OneTimeWorkRequestBuilder<DiscoverySyncWorker>()
                 .addTag(TAG)
@@ -61,9 +57,6 @@ class DiscoverySyncWorker(
             WorkManager.getInstance(context).enqueue(request)
         }
 
-        /**
-         * Sets up the background app task to run automatically every 12 hours
-         */
         fun setupPeriodicSync(context: Context) {
             val request = PeriodicWorkRequestBuilder<DiscoverySyncWorker>(12, TimeUnit.HOURS)
                 .addTag(TAG)
