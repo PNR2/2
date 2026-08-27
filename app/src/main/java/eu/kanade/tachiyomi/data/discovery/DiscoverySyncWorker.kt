@@ -52,7 +52,6 @@ class DiscoverySyncWorker(
             // 2. Fetch MyAnimeList Seasonal Manga
             val fetchedManga = malFetcher.fetchSeasonalManga()
             if (fetchedManga.isNotEmpty()) {
-                
                 // 3. THE AUTOMATION ENGINE
                 // Grab all online extensions the user has installed
                 val installedSources = sourceManager.getOnlineSources().filterIsInstance<CatalogueSource>()
@@ -89,7 +88,9 @@ class DiscoverySyncWorker(
 
                 // Save the MAL data AND the matched extension data to our custom SQLite database
                 malRepository.insertSeasonalManga(matchedMangaList)
-                logcat(LogPriority.INFO) { "MUSYomi: Successfully saved ${matchedMangaList.size} seasonal manga with automation." }
+                logcat(LogPriority.INFO) {
+                    "MUSYomi: Successfully saved ${matchedMangaList.size} seasonal manga with automation."
+                }
             }
 
             logcat(LogPriority.INFO) { "MUSYomi: Background Sync Completed Successfully." }
