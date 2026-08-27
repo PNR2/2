@@ -23,7 +23,7 @@ object NewsTab : Tab {
         get() {
             val title = "News"
             val icon = rememberVectorPainter(Icons.Outlined.Article)
-            
+
             return remember {
                 TabOptions(
                     index = 10u, // Assigning a high index so it loads at the end of the bottom bar
