@@ -10,8 +10,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import cafe.adriel.voyager.navigator.tab.Tab
+import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.tab.TabOptions
+import eu.kanade.presentation.util.Tab
 
 /**
  * The main UI screen for the RSS News feed.
@@ -32,6 +33,10 @@ object NewsTab : Tab {
                 )
             }
         }
+
+    override suspend fun onReselect(navigator: Navigator) {
+        // TODO: Handle double-tap tab behavior later (like scrolling to the top of the news feed)
+    }
 
     @Composable
     override fun Content() {
