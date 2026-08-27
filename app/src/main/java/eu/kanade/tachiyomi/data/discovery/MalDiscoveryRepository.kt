@@ -2,6 +2,7 @@
 
 package eu.kanade.tachiyomi.data.discovery
 
+import android.app.Application
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
@@ -21,11 +22,12 @@ enum class DiscoverySort {
 class MalDiscoveryRepository {
 
     companion object {
-        private val context: Context = Injekt.get()
-        private val dbHelper = DiscoveryDatabaseHelper(context)
+        // Changed to Application to satisfy the database helper!
+        private val application: Application = Injekt.get()
+        private val dbHelper = DiscoveryDatabaseHelper(application)
 
         // NEW: Native SharedPreferences to store the ON/OFF toggle
-        private val prefs = context.getSharedPreferences("discovery_prefs", Context.MODE_PRIVATE)
+        private val prefs = application.getSharedPreferences("discovery_prefs", Context.MODE_PRIVATE)
 
         private val mangaFlowState = MutableStateFlow<List<MalDiscoveryItem>>(emptyList())
         private var currentSort = DiscoverySort.LATEST
