@@ -31,6 +31,9 @@ class MalDiscoveryRepository {
             if (cursor.moveToFirst()) {
                 do {
                     val scoreIndex = cursor.getColumnIndexOrThrow("score")
+                    val sourceIdIndex = cursor.getColumnIndexOrThrow("source_id")
+                    val mangaUrlIndex = cursor.getColumnIndexOrThrow("manga_url")
+
                     list.add(
                         MalDiscoveryItem(
                             malId = cursor.getLong(cursor.getColumnIndexOrThrow("mal_id")),
@@ -40,6 +43,8 @@ class MalDiscoveryRepository {
                             score = if (cursor.isNull(scoreIndex)) null else cursor.getDouble(scoreIndex),
                             startDate = cursor.getString(cursor.getColumnIndexOrThrow("start_date")),
                             isSeasonal = cursor.getInt(cursor.getColumnIndexOrThrow("is_seasonal")) == 1,
+                            sourceId = if (cursor.isNull(sourceIdIndex)) null else cursor.getLong(sourceIdIndex),
+                            mangaUrl = if (cursor.isNull(mangaUrlIndex)) null else cursor.getString(mangaUrlIndex),
                         ),
                     )
                 } while (cursor.moveToNext())
@@ -64,6 +69,8 @@ class MalDiscoveryRepository {
                     put("start_date", manga.startDate)
                     put("is_seasonal", if (manga.isSeasonal) 1 else 0)
                     put("last_synced", currentTime)
+                    put("source_id", manga.sourceId)
+                    put("manga_url", manga.mangaUrl)
                 }
                 db.insertWithOnConflict(
                     "mal_discovery_entry",
