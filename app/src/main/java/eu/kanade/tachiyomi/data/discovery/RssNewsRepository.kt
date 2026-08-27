@@ -1,3 +1,5 @@
+@file:Suppress("ktlint:standard:max-line-length")
+
 package eu.kanade.tachiyomi.data.discovery
 
 import android.app.Application
@@ -9,8 +11,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-
-/* ktlint-disable standard:max-line-length */
 
 class DiscoveryDatabaseHelper(
     app: Application,
@@ -57,6 +57,7 @@ class RssNewsRepository {
 
     companion object {
         private val dbHelper = DiscoveryDatabaseHelper(Injekt.get())
+
         // Renamed to remove the underscore and satisfy ktlint
         private val newsFlowState = MutableStateFlow<List<RssNewsItem>>(emptyList())
 
