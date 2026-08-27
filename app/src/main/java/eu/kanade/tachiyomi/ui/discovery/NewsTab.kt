@@ -237,6 +237,7 @@ object NewsTab : VoyagerTab {
 
     @Composable
     private fun SeasonalGrid(mangaList: List<MalDiscoveryItem>) {
+        val context = LocalContext.current
         val navigator = LocalNavigator.currentOrThrow
 
         if (mangaList.isEmpty()) {
@@ -263,7 +264,7 @@ object NewsTab : VoyagerTab {
                             } else {
                                 val url = "https://myanimelist.net/manga/${manga.malId}"
                                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                navigator.context.startActivity(intent)
+                                context.startActivity(intent)
                             }
                         },
                     )
