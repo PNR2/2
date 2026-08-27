@@ -10,20 +10,36 @@ import kotlinx.coroutines.flow.asStateFlow
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
-/**
- * Standard Android SQLite implementation to guarantee no build conflicts.
- * This completely decouples our custom discovery features from Mihon's internal DB wrapper.
- */
+/* ktlint-disable standard:max-line-length */
+
 class DiscoveryDatabaseHelper(
     app: Application,
 ) : SQLiteOpenHelper(app, "musyomi_discovery.db", null, 1) {
 
     override fun onCreate(db: SQLiteDatabase) {
-        val createNewsTable = "CREATE TABLE IF NOT EXISTS rss_news_article (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, link TEXT UNIQUE NOT NULL, description TEXT, image_url TEXT, publication_date INTEGER NOT NULL, source_name TEXT NOT NULL, is_read INTEGER DEFAULT 0)"
-        db.execSQL(createNewsTable)
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS rss_news_article (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                "title TEXT NOT NULL, " +
+                "link TEXT UNIQUE NOT NULL, " +
+                "description TEXT, " +
+                "image_url TEXT, " +
+                "publication_date INTEGER NOT NULL, " +
+                "source_name TEXT NOT NULL, " +
+                "is_read INTEGER DEFAULT 0)",
+        )
 
-        val createMalTable = "CREATE TABLE IF NOT EXISTS mal_discovery_entry (mal_id INTEGER PRIMARY KEY, title TEXT NOT NULL, cover_url TEXT, synopsis TEXT, score REAL, start_date TEXT, is_seasonal INTEGER DEFAULT 1, last_synced INTEGER NOT NULL)"
-        db.execSQL(createMalTable)
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS mal_discovery_entry (" +
+                "mal_id INTEGER PRIMARY KEY, " +
+                "title TEXT NOT NULL, " +
+                "cover_url TEXT, " +
+                "synopsis TEXT, " +
+                "score REAL, " +
+                "start_date TEXT, " +
+                "is_seasonal INTEGER DEFAULT 1, " +
+                "last_synced INTEGER NOT NULL)",
+        )
     }
 
     override fun onUpgrade(
@@ -40,7 +56,6 @@ class DiscoveryDatabaseHelper(
 class RssNewsRepository {
 
     companion object {
-        // Singleton pattern ensures background workers and UI share the same data stream
         private val dbHelper = DiscoveryDatabaseHelper(Injekt.get())
         private val _newsFlow = MutableStateFlow<List<RssNewsItem>>(emptyList())
 
@@ -50,7 +65,10 @@ class RssNewsRepository {
 
         fun refreshFlow() {
             val db = dbHelper.readableDatabase
-            val cursor = db.rawQuery("SELECT * FROM rss_news_article ORDER BY publication_date DESC", null)
+            val cursor = db.rawQuery(
+                "SELECT * FROM rss_news_article ORDER BY publication_date DESC",
+                null,
+            )
             val list = mutableListOf<RssNewsItem>()
 
             if (cursor.moveToFirst()) {
@@ -59,10 +77,18 @@ class RssNewsRepository {
                         RssNewsItem(
                             title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
                             link = cursor.getString(cursor.getColumnIndexOrThrow("link")),
-                            description = cursor.getString(cursor.getColumnIndexOrThrow("description")),
-                            imageUrl = cursor.getString(cursor.getColumnIndexOrThrow("image_url")),
-                            publicationDate = cursor.getLong(cursor.getColumnIndexOrThrow("publication_date")),
-                            sourceName = cursor.getString(cursor.getColumnIndexOrThrow("source_name")),
+                            description = cursor.getString(
+                                cursor.getColumnIndexOrThrow("description"),
+                            ),
+                            imageUrl = cursor.getString(
+                                cursor.getColumnIndexOrThrow("image_url"),
+                            ),
+                            publicationDate = cursor.getLong(
+                                cursor.getColumnIndexOrThrow("publication_date"),
+                            ),
+                            sourceName = cursor.getString(
+                                cursor.getColumnIndexOrThrow("source_name"),
+                            ),
                         ),
                     )
                 } while (cursor.moveToNext())
@@ -86,15 +112,17 @@ class RssNewsRepository {
                     put("source_name", article.sourceName)
                     put("is_read", 0)
                 }
-                // CONFLICT_REPLACE ensures we don't get duplicates if we download the same news twice
-                db.insertWithOnConflict("rss_news_article", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+                db.insertWithOnConflict(
+                    "rss_news_article",
+                    null,
+                    values,
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
             }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
         }
-
-        // Push the new data to the UI instantly
         refreshFlow()
     }
 
