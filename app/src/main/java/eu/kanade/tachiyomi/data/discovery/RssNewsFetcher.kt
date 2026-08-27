@@ -22,7 +22,7 @@ class RssNewsFetcher {
     suspend fun fetchNews(feedUrl: String, sourceName: String): List<RssNewsItem> {
         return try {
             val request = GET(feedUrl)
-            
+
             // Mihon uses a custom await() extension for OkHttp Calls
             val response = network.client.newCall(request).await()
             val xmlBody = response.body?.string() ?: return emptyList()
