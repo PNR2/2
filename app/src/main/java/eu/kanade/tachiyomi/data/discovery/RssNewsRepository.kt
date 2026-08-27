@@ -34,7 +34,16 @@ class RssNewsRepository {
     fun subscribeToNews(): Flow<List<RssNewsItem>> {
         // subscribeToList automatically pushes updates to the UI whenever the table changes!
         return handler.subscribeToList {
-            discoveryQueries.selectAllNews { id, title, link, description, image_url, publication_date, source_name, is_read ->
+            discoveryQueries.selectAllNews {
+                    id,
+                    title,
+                    link,
+                    description,
+                    image_url,
+                    publication_date,
+                    source_name,
+                    is_read,
+                ->
                 RssNewsItem(
                     title = title,
                     link = link,
