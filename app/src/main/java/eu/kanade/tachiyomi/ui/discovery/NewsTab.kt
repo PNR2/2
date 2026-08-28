@@ -4,7 +4,6 @@ package eu.kanade.tachiyomi.ui.discovery
 
 import android.content.Intent
 import android.net.Uri
-import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,12 +61,14 @@ import cafe.adriel.voyager.navigator.tab.TabOptions
 import coil3.compose.AsyncImage
 import eu.kanade.tachiyomi.data.discovery.DiscoveryProgressState
 import eu.kanade.tachiyomi.data.discovery.DiscoverySort
-import eu.kanade.tachiyomi.data.discovery.DiscoverySyncWorker
+import eu.kanade.tachiyomi.data.discovery.DiscoverySyncer
 import eu.kanade.tachiyomi.data.discovery.MalDiscoveryItem
 import eu.kanade.tachiyomi.data.discovery.MalDiscoveryRepository
 import eu.kanade.tachiyomi.data.discovery.RssNewsItem
 import eu.kanade.tachiyomi.data.discovery.RssNewsRepository
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -90,6 +92,7 @@ object NewsTab : VoyagerTab {
         val context = LocalContext.current
         val rssRepo = remember { RssNewsRepository() }
         val malRepo = remember { MalDiscoveryRepository() }
+        val coroutineScope = rememberCoroutineScope()
 
         val articles by rssRepo.subscribeToNews().collectAsState(initial = emptyList())
         val seasonalManga by malRepo.subscribeToSeasonalManga().collectAsState(initial = emptyList())
@@ -154,12 +157,10 @@ object NewsTab : VoyagerTab {
                             IconButton(
                                 enabled = !syncProgress.isRunning,
                                 onClick = {
-                                    Toast.makeText(
-                                        context,
-                                        "Starting sync...",
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
-                                    DiscoverySyncWorker.startNow(context)
+                                    // LAUNCH DIRECTLY - NO WORKMANAGER DELAYS
+                                    coroutineScope.launch(Dispatchers.IO) {
+                                        DiscoverySyncer.syncNow()
+                                    }
                                 },
                             ) {
                                 Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
