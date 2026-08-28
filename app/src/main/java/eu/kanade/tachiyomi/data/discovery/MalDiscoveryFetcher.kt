@@ -17,7 +17,10 @@ class MalDiscoveryFetcher {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
+    private val json = Json {
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+    }
 
     suspend fun fetchSeasonalManga(): List<MalDiscoveryItem> {
         return withContext(Dispatchers.IO) {
@@ -58,7 +61,7 @@ class MalDiscoveryFetcher {
                             score = 0.0,
                             startDate = "Error",
                             isSeasonal = true,
-                        )
+                        ),
                     )
                 }
             } catch (e: Exception) {
@@ -73,7 +76,7 @@ class MalDiscoveryFetcher {
                         score = 0.0,
                         startDate = "Error",
                         isSeasonal = true,
-                    )
+                    ),
                 )
             }
         }
