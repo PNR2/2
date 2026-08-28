@@ -12,8 +12,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import eu.kanade.tachiyomi.source.CatalogueSource
 import kotlinx.coroutines.delay
-import logcat.LogPriority
-import logcat.logcat
+import kotlinx.coroutines.withTimeoutOrNull
 import tachiyomi.domain.source.service.SourceManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -33,54 +32,63 @@ class DiscoverySyncWorker(
     private val sourceManager: SourceManager = Injekt.get()
 
     override suspend fun doWork(): Result {
-        logcat(LogPriority.INFO) { "MUSYomi: Starting Background Sync..." }
-
+        // 1. Fetch RSS with a strict 10-second kill switch
         try {
-            val newsUrl = "https://www.animenewsnetwork.com/news/rss.xml"
-            val fetchedNews = rssFetcher.fetchNews(newsUrl, "Anime News Network")
-            if (fetchedNews.isNotEmpty()) {
-                rssRepository.insertNews(fetchedNews)
+            withTimeoutOrNull(10000) {
+                val newsUrl = "https://www.animenewsnetwork.com/news/rss.xml"
+                val fetchedNews = rssFetcher.fetchNews(newsUrl, "Anime News Network")
+                if (fetchedNews.isNotEmpty()) {
+                    rssRepository.insertNews(fetchedNews)
+                }
             }
         } catch (e: Exception) {
-            logcat(LogPriority.ERROR) { "MUSYomi: RSS News Fetch Failed" }
+            // Silently skip if RSS crashes
         }
 
+        // 2. Fetch MAL with a 30-second kill switch for the whole process
         try {
-            val fetchedManga = malFetcher.fetchSeasonalManga()
-            if (fetchedManga.isNotEmpty()) {
-                val installedSources = sourceManager.getOnlineSources().filterIsInstance<CatalogueSource>()
-                val activeSource = installedSources.firstOrNull()
+            withTimeoutOrNull(30000) {
+                val fetchedManga = malFetcher.fetchSeasonalManga()
+                
+                if (fetchedManga.isNotEmpty()) {
+                    val installedSources = sourceManager.getOnlineSources().filterIsInstance<CatalogueSource>()
+                    val activeSource = installedSources.firstOrNull()
+                    val isAutoOn = MalDiscoveryRepository.isAutomationEnabled()
 
-                val matchedMangaList = fetchedManga.map { manga ->
-                    var matchedSourceId: Long? = null
-                    var matchedMangaUrl: String? = null
+                    val matchedMangaList = fetchedManga.map { manga ->
+                        var matchedSourceId: Long? = null
+                        var matchedMangaUrl: String? = null
 
-                    // Accessing static repository companion check directly
-                    if (activeSource != null && MalDiscoveryRepository.isAutomationEnabled()) {
-                        try {
-                            val filters = activeSource.getFilterList()
-                            val searchPage = activeSource.getSearchManga(1, manga.title, filters)
-                            val topMatch = searchPage.mangas.firstOrNull()
+                        // Only search if Auto-Link is ON and it's not a fake error card (malId > 0)
+                        if (isAutoOn && activeSource != null && manga.malId > 0) {
+                            try {
+                                // 3-second kill switch per extension search!
+                                withTimeoutOrNull(3000) {
+                                    val filters = activeSource.getFilterList()
+                                    val searchPage = activeSource.getSearchManga(1, manga.title, filters)
+                                    val topMatch = searchPage.mangas.firstOrNull()
 
-                            if (topMatch != null) {
-                                matchedSourceId = activeSource.id
-                                matchedMangaUrl = topMatch.url
+                                    if (topMatch != null) {
+                                        matchedSourceId = activeSource.id
+                                        matchedMangaUrl = topMatch.url
+                                    }
+                                }
+                                delay(500) // Small polite delay so we don't get banned
+                            } catch (e: Exception) {
+                                // Silently skip if extension crashes
                             }
-                            delay(1000)
-                        } catch (e: Exception) {
-                            logcat(LogPriority.ERROR) { "MUSYomi: Automation search failed for ${manga.title}" }
                         }
-                    }
 
-                    manga.copy(
-                        sourceId = matchedSourceId,
-                        mangaUrl = matchedMangaUrl,
-                    )
+                        manga.copy(
+                            sourceId = matchedSourceId,
+                            mangaUrl = matchedMangaUrl,
+                        )
+                    }
+                    malRepository.insertSeasonalManga(matchedMangaList)
                 }
-                malRepository.insertSeasonalManga(matchedMangaList)
             }
         } catch (e: Exception) {
-            logcat(LogPriority.ERROR) { "MUSYomi: MAL Fetch Failed" }
+            // Silently skip if MAL crashes
         }
 
         return Result.success()
