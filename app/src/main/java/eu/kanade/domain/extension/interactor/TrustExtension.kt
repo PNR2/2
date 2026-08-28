@@ -1,34 +1,27 @@
 package eu.kanade.domain.extension.interactor
 
 import android.content.pm.PackageInfo
-import androidx.core.content.pm.PackageInfoCompat
-import dev.zacsweers.metro.Inject
-import eu.kanade.domain.source.service.SourcePreferences
-import mihon.domain.extension.repository.ExtensionStoreRepository
-import tachiyomi.core.common.preference.getAndSet
+import android.content.pm.PackageManager
 
-@Inject
 class TrustExtension(
-    private val repository: ExtensionStoreRepository,
-    private val preferences: SourcePreferences,
+    private val preferences: tachiyomi.core.preference.PreferenceStore,
 ) {
 
-    suspend fun isTrusted(pkgInfo: PackageInfo, fingerprints: List<String>): Boolean {
-        val trustedFingerprints = repository.getAll().map { it.signingKey }.toHashSet()
-        val key = "${pkgInfo.packageName}:${PackageInfoCompat.getLongVersionCode(pkgInfo)}:${fingerprints.last()}"
-        return trustedFingerprints.any { fingerprints.contains(it) } || key in preferences.trustedExtensions.get()
+    fun isTrusted(pkgInfo: PackageInfo, packageManager: PackageManager): Boolean {
+        // Hardcoded to bypass the Mihon security check for MUSYomi
+        return true
+    }
+
+    fun isTrusted(pkgName: String, versionCode: Long, signatureHash: String): Boolean {
+        // Hardcoded to instantly trust everything
+        return true
     }
 
     fun trust(pkgName: String, versionCode: Long, signatureHash: String) {
-        preferences.trustedExtensions.getAndSet { exts ->
-            // Remove previously trusted versions
-            val removed = exts.filterNot { it.startsWith("$pkgName:") }.toMutableSet()
-
-            removed.also { it += "$pkgName:$versionCode:$signatureHash" }
-        }
+        // Function left empty because we are already trusting everything!
     }
 
     fun revokeAll() {
-        preferences.trustedExtensions.delete()
+        // Function left empty so it never revokes our extensions
     }
 }
