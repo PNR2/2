@@ -11,7 +11,6 @@ import java.util.concurrent.TimeUnit
 
 class MalDiscoveryFetcher {
 
-    // Added strict 15-second timeouts so the spinner never hangs forever!
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -26,7 +25,8 @@ class MalDiscoveryFetcher {
         return withContext(Dispatchers.IO) {
             try {
                 val request = Request.Builder()
-                    .url("https://api.jikan.moe/v4/top/manga?filter=publishing")
+                    .url("https://api.jikan.moe/v4/top/manga?filter=publishing&limit=25")
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 MUSYomi")
                     .get()
                     .build()
 
@@ -51,13 +51,12 @@ class MalDiscoveryFetcher {
                         )
                     }
                 } else {
-                    // ERROR CATCHER 1: API blocked us (e.g., 403 or 429 Rate Limit)
                     listOf(
                         MalDiscoveryItem(
                             malId = -1,
                             title = "API Error: HTTP ${response.code}",
-                            coverUrl = "https://via.placeholder.com/300x400.png/f04c4c/ffffff?text=API+Error",
-                            synopsis = "The API rejected the request. Body: $responseBody",
+                            coverUrl = "",
+                            synopsis = "Failed with status code: ${response.code}",
                             score = 0.0,
                             startDate = "Error",
                             isSeasonal = true,
@@ -65,14 +64,12 @@ class MalDiscoveryFetcher {
                     )
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
-                // ERROR CATCHER 2: The app crashed while parsing or lost internet connection
                 listOf(
                     MalDiscoveryItem(
                         malId = -2,
-                        title = "Crash: ${e.javaClass.simpleName}",
-                        coverUrl = "https://via.placeholder.com/300x400.png/f04c4c/ffffff?text=Crash",
-                        synopsis = e.message ?: "Unknown crash occurred.",
+                        title = "Network Error: ${e.javaClass.simpleName}",
+                        coverUrl = "",
+                        synopsis = e.message ?: "Could not connect to server.",
                         score = 0.0,
                         startDate = "Error",
                         isSeasonal = true,
