@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -27,13 +26,13 @@ import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
@@ -55,12 +54,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.work.WorkManager
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import coil3.compose.AsyncImage
+import eu.kanade.tachiyomi.data.discovery.DiscoveryProgressState
 import eu.kanade.tachiyomi.data.discovery.DiscoverySort
 import eu.kanade.tachiyomi.data.discovery.DiscoverySyncWorker
 import eu.kanade.tachiyomi.data.discovery.MalDiscoveryItem
@@ -94,12 +93,7 @@ object NewsTab : VoyagerTab {
 
         val articles by rssRepo.subscribeToNews().collectAsState(initial = emptyList())
         val seasonalManga by malRepo.subscribeToSeasonalManga().collectAsState(initial = emptyList())
-
-        val workManager = remember { WorkManager.getInstance(context) }
-        val workInfos by workManager.getWorkInfosByTagFlow(
-            DiscoverySyncWorker.TAG,
-        ).collectAsState(initial = emptyList())
-        val isRefreshing = workInfos.any { it.state.isFinished.not() }
+        val syncProgress by DiscoveryProgressState.progress.collectAsState()
 
         var selectedTabIndex by remember { mutableIntStateOf(0) }
         val tabs = listOf("News", "Seasonal")
@@ -157,29 +151,42 @@ object NewsTab : VoyagerTab {
                                 }
                             }
 
-                            if (isRefreshing) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier
-                                        .padding(end = 16.dp, start = 8.dp)
-                                        .size(24.dp),
-                                    strokeWidth = 2.dp,
-                                )
-                            } else {
-                                IconButton(
-                                    onClick = {
-                                        Toast.makeText(
-                                            context,
-                                            "Searching for Seasonal Manga...",
-                                            Toast.LENGTH_SHORT,
-                                        ).show()
-                                        DiscoverySyncWorker.startNow(context)
-                                    },
-                                ) {
-                                    Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
-                                }
+                            IconButton(
+                                enabled = !syncProgress.isRunning,
+                                onClick = {
+                                    Toast.makeText(
+                                        context,
+                                        "Starting sync...",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                    DiscoverySyncWorker.startNow(context)
+                                },
+                            ) {
+                                Icon(Icons.Outlined.Refresh, contentDescription = "Refresh")
                             }
                         },
                     )
+
+                    // Live Percentage Progress Indicator Bar
+                    if (syncProgress.isRunning) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                        ) {
+                            LinearProgressIndicator(
+                                progress = { syncProgress.percentage / 100f },
+                                modifier = Modifier.fillMaxWidth().height(6.dp),
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${syncProgress.percentage}% - ${syncProgress.message}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+
                     TabRow(selectedTabIndex = selectedTabIndex) {
                         tabs.forEachIndexed { index, title ->
                             Tab(
@@ -359,7 +366,7 @@ object NewsTab : VoyagerTab {
                         )
                     } else {
                         Text(
-                            text = if (manga.score != null) "⭐ ${manga.score}" else "No Score",
+                            text = if (manga.score != null && manga.score > 0.0) "⭐ ${manga.score}" else "",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                         )
