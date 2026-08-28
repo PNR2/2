@@ -1,27 +1,29 @@
+@file:Suppress("ktlint:standard:max-line-length")
+
 package eu.kanade.domain.extension.interactor
 
 import android.content.pm.PackageInfo
-import android.content.pm.PackageManager
 
 class TrustExtension(
-    private val preferences: tachiyomi.core.preference.PreferenceStore,
+    private val preferences: Any? = null,
+    vararg args: Any?
 ) {
 
-    fun isTrusted(pkgInfo: PackageInfo, packageManager: PackageManager): Boolean {
-        // Hardcoded to bypass the Mihon security check for MUSYomi
+    fun isTrusted(pkgInfo: PackageInfo, signatures: List<String>): Boolean {
+        // Instantly trust all extensions
         return true
     }
 
     fun isTrusted(pkgName: String, versionCode: Long, signatureHash: String): Boolean {
-        // Hardcoded to instantly trust everything
+        // Instantly trust all extensions
         return true
     }
 
     fun trust(pkgName: String, versionCode: Long, signatureHash: String) {
-        // Function left empty because we are already trusting everything!
+        // Left intentionally empty because everything is already trusted
     }
 
     fun revokeAll() {
-        // Function left empty so it never revokes our extensions
+        // Left intentionally empty so your extensions are never revoked
     }
 }
