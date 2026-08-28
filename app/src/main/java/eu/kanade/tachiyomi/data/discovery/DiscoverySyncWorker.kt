@@ -32,11 +32,19 @@ class DiscoverySyncWorker(
     private val sourceManager: SourceManager = Injekt.get()
 
     override suspend fun doWork(): Result {
-        DiscoveryProgressState.update(isRunning = true, percentage = 10, message = "Starting sync...")
+        DiscoveryProgressState.update(
+            isRunning = true,
+            percentage = 10,
+            message = "Starting sync...",
+        )
 
         // 1. Fetch RSS News (10% -> 40%)
         try {
-            DiscoveryProgressState.update(isRunning = true, percentage = 25, message = "Fetching latest anime news...")
+            DiscoveryProgressState.update(
+                isRunning = true,
+                percentage = 25,
+                message = "Fetching latest anime news...",
+            )
             withTimeoutOrNull(10000) {
                 val newsUrl = "https://www.animenewsnetwork.com/news/rss.xml"
                 val fetchedNews = rssFetcher.fetchNews(newsUrl, "Anime News Network")
@@ -50,12 +58,20 @@ class DiscoverySyncWorker(
 
         // 2. Fetch Manga from MAL (40% -> 70%)
         try {
-            DiscoveryProgressState.update(isRunning = true, percentage = 50, message = "Fetching seasonal manga from MAL...")
+            DiscoveryProgressState.update(
+                isRunning = true,
+                percentage = 50,
+                message = "Fetching seasonal manga from MAL...",
+            )
             withTimeoutOrNull(20000) {
                 val fetchedManga = malFetcher.fetchSeasonalManga()
 
                 if (fetchedManga.isNotEmpty()) {
-                    DiscoveryProgressState.update(isRunning = true, percentage = 75, message = "Checking extension matching...")
+                    DiscoveryProgressState.update(
+                        isRunning = true,
+                        percentage = 75,
+                        message = "Checking extension matching...",
+                    )
                     val installedSources = sourceManager.getOnlineSources().filterIsInstance<CatalogueSource>()
                     val activeSource = installedSources.firstOrNull()
                     val isAutoOn = MalDiscoveryRepository.isAutomationEnabled()
@@ -88,7 +104,11 @@ class DiscoverySyncWorker(
                         )
                     }
 
-                    DiscoveryProgressState.update(isRunning = true, percentage = 90, message = "Saving to database...")
+                    DiscoveryProgressState.update(
+                        isRunning = true,
+                        percentage = 90,
+                        message = "Saving to database...",
+                    )
                     malRepository.insertSeasonalManga(matchedMangaList)
                 }
             }
@@ -96,7 +116,11 @@ class DiscoverySyncWorker(
             // Silently skip if MAL fails
         }
 
-        DiscoveryProgressState.update(isRunning = true, percentage = 100, message = "Done!")
+        DiscoveryProgressState.update(
+            isRunning = true,
+            percentage = 100,
+            message = "Done!",
+        )
         delay(800)
         DiscoveryProgressState.reset()
 
