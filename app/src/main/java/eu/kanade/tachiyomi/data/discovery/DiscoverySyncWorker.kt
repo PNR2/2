@@ -49,7 +49,7 @@ class DiscoverySyncWorker(
         try {
             withTimeoutOrNull(30000) {
                 val fetchedManga = malFetcher.fetchSeasonalManga()
-                
+
                 if (fetchedManga.isNotEmpty()) {
                     val installedSources = sourceManager.getOnlineSources().filterIsInstance<CatalogueSource>()
                     val activeSource = installedSources.firstOrNull()
