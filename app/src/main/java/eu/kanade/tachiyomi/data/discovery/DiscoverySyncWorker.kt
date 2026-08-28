@@ -32,8 +32,11 @@ class DiscoverySyncWorker(
     private val sourceManager: SourceManager = Injekt.get()
 
     override suspend fun doWork(): Result {
-        // 1. Fetch RSS with a strict 10-second kill switch
+        DiscoveryProgressState.update(isRunning = true, percentage = 10, message = "Starting sync...")
+
+        // 1. Fetch RSS News (10% -> 40%)
         try {
+            DiscoveryProgressState.update(isRunning = true, percentage = 25, message = "Fetching latest anime news...")
             withTimeoutOrNull(10000) {
                 val newsUrl = "https://www.animenewsnetwork.com/news/rss.xml"
                 val fetchedNews = rssFetcher.fetchNews(newsUrl, "Anime News Network")
@@ -42,15 +45,17 @@ class DiscoverySyncWorker(
                 }
             }
         } catch (e: Exception) {
-            // Silently skip if RSS crashes
+            // Silently skip if RSS fails
         }
 
-        // 2. Fetch MAL with a 30-second kill switch for the whole process
+        // 2. Fetch Manga from MAL (40% -> 70%)
         try {
-            withTimeoutOrNull(30000) {
+            DiscoveryProgressState.update(isRunning = true, percentage = 50, message = "Fetching seasonal manga from MAL...")
+            withTimeoutOrNull(20000) {
                 val fetchedManga = malFetcher.fetchSeasonalManga()
 
                 if (fetchedManga.isNotEmpty()) {
+                    DiscoveryProgressState.update(isRunning = true, percentage = 75, message = "Checking extension matching...")
                     val installedSources = sourceManager.getOnlineSources().filterIsInstance<CatalogueSource>()
                     val activeSource = installedSources.firstOrNull()
                     val isAutoOn = MalDiscoveryRepository.isAutomationEnabled()
@@ -59,11 +64,9 @@ class DiscoverySyncWorker(
                         var matchedSourceId: Long? = null
                         var matchedMangaUrl: String? = null
 
-                        // Only search if Auto-Link is ON and it's not a fake error card (malId > 0)
                         if (isAutoOn && activeSource != null && manga.malId > 0) {
                             try {
-                                // 3-second kill switch per extension search!
-                                withTimeoutOrNull(3000) {
+                                withTimeoutOrNull(2500) {
                                     val filters = activeSource.getFilterList()
                                     val searchPage = activeSource.getSearchManga(1, manga.title, filters)
                                     val topMatch = searchPage.mangas.firstOrNull()
@@ -73,9 +76,9 @@ class DiscoverySyncWorker(
                                         matchedMangaUrl = topMatch.url
                                     }
                                 }
-                                delay(500) // Small polite delay so we don't get banned
+                                delay(300)
                             } catch (e: Exception) {
-                                // Silently skip if extension crashes
+                                // Skip extension search error
                             }
                         }
 
@@ -84,12 +87,18 @@ class DiscoverySyncWorker(
                             mangaUrl = matchedMangaUrl,
                         )
                     }
+
+                    DiscoveryProgressState.update(isRunning = true, percentage = 90, message = "Saving to database...")
                     malRepository.insertSeasonalManga(matchedMangaList)
                 }
             }
         } catch (e: Exception) {
-            // Silently skip if MAL crashes
+            // Silently skip if MAL fails
         }
+
+        DiscoveryProgressState.update(isRunning = true, percentage = 100, message = "Done!")
+        delay(800)
+        DiscoveryProgressState.reset()
 
         return Result.success()
     }
