@@ -26,7 +26,10 @@ class MalDiscoveryFetcher {
             try {
                 val request = Request.Builder()
                     .url("https://api.jikan.moe/v4/top/manga?filter=publishing&limit=25")
-                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 MUSYomi")
+                    .header(
+                        "User-Agent",
+                        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 MUSYomi",
+                    )
                     .get()
                     .build()
 
