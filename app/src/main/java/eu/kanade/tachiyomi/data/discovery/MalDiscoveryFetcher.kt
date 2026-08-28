@@ -1,3 +1,5 @@
+@file:Suppress("ktlint:standard:max-line-length")
+
 package eu.kanade.tachiyomi.data.discovery
 
 import kotlinx.coroutines.Dispatchers
@@ -5,22 +7,21 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.util.concurrent.TimeUnit
 
-/**
- * Reaches out to the Jikan (MyAnimeList) API to fetch trending/seasonal manga.
- */
 class MalDiscoveryFetcher {
 
-    // Using a standard OkHttpClient to guarantee no module visibility issues
-    private val client = OkHttpClient()
+    // Added strict 15-second timeouts so the spinner never hangs forever!
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
 
-    // Configure JSON parser to safely ignore any extra data the API sends
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
     suspend fun fetchSeasonalManga(): List<MalDiscoveryItem> {
         return withContext(Dispatchers.IO) {
             try {
-                // Fetching the top currently publishing manga
                 val request = Request.Builder()
                     .url("https://api.jikan.moe/v4/top/manga?filter=publishing")
                     .get()
@@ -47,11 +48,33 @@ class MalDiscoveryFetcher {
                         )
                     }
                 } else {
-                    emptyList()
+                    // ERROR CATCHER 1: API blocked us (e.g., 403 or 429 Rate Limit)
+                    listOf(
+                        MalDiscoveryItem(
+                            malId = -1,
+                            title = "API Error: HTTP ${response.code}",
+                            coverUrl = "https://via.placeholder.com/300x400.png/f04c4c/ffffff?text=API+Error",
+                            synopsis = "The API rejected the request. Body: $responseBody",
+                            score = 0.0,
+                            startDate = "Error",
+                            isSeasonal = true,
+                        )
+                    )
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                emptyList()
+                // ERROR CATCHER 2: The app crashed while parsing or lost internet connection
+                listOf(
+                    MalDiscoveryItem(
+                        malId = -2,
+                        title = "Crash: ${e.javaClass.simpleName}",
+                        coverUrl = "https://via.placeholder.com/300x400.png/f04c4c/ffffff?text=Crash",
+                        synopsis = e.message ?: "Unknown crash occurred.",
+                        score = 0.0,
+                        startDate = "Error",
+                        isSeasonal = true,
+                    )
+                )
             }
         }
     }
