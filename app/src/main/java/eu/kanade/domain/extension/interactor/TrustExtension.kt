@@ -6,7 +6,7 @@ import android.content.pm.PackageInfo
 
 class TrustExtension(
     private val preferences: Any? = null,
-    vararg args: Any?
+    vararg args: Any?,
 ) {
 
     fun isTrusted(pkgInfo: PackageInfo, signatures: List<String>): Boolean {
