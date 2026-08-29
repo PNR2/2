@@ -14,7 +14,7 @@ import uy.kohesive.injekt.api.get
 
 class DiscoveryDatabaseHelper(
     app: Application,
-) : SQLiteOpenHelper(app, "musyomi_discovery.db", null, 2) { // UPGRADED TO VERSION 2
+) : SQLiteOpenHelper(app, "musyomi_discovery.db", null, 3) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -39,8 +39,12 @@ class DiscoveryDatabaseHelper(
                 "start_date TEXT, " +
                 "is_seasonal INTEGER DEFAULT 1, " +
                 "last_synced INTEGER NOT NULL, " +
-                "source_id INTEGER, " + // NEW AUTOMATION COLUMN
-                "manga_url TEXT)", // NEW AUTOMATION COLUMN
+                "source_id INTEGER, " +
+                "manga_url TEXT, " +
+                "chapters INTEGER, " +
+                "status TEXT, " +
+                "authors TEXT, " +
+                "genres TEXT)",
         )
     }
 
@@ -49,10 +53,25 @@ class DiscoveryDatabaseHelper(
         oldVersion: Int,
         newVersion: Int,
     ) {
-        // Wipes the old cache and recreates it with the new columns
-        db.execSQL("DROP TABLE IF EXISTS rss_news_article")
-        db.execSQL("DROP TABLE IF EXISTS mal_discovery_entry")
-        onCreate(db)
+        // Safe upgrade – add missing columns if they do not exist
+        if (oldVersion < 3) {
+            try {
+                db.execSQL("ALTER TABLE mal_discovery_entry ADD COLUMN chapters INTEGER")
+            } catch (_: Exception) {
+            }
+            try {
+                db.execSQL("ALTER TABLE mal_discovery_entry ADD COLUMN status TEXT")
+            } catch (_: Exception) {
+            }
+            try {
+                db.execSQL("ALTER TABLE mal_discovery_entry ADD COLUMN authors TEXT")
+            } catch (_: Exception) {
+            }
+            try {
+                db.execSQL("ALTER TABLE mal_discovery_entry ADD COLUMN genres TEXT")
+            } catch (_: Exception) {
+            }
+        }
     }
 }
 
