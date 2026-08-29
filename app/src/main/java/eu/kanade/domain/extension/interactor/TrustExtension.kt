@@ -3,11 +3,9 @@
 package eu.kanade.domain.extension.interactor
 
 import android.content.pm.PackageInfo
+import javax.inject.Inject
 
-class TrustExtension(
-    private val preferences: Any? = null,
-    vararg args: Any?,
-) {
+class TrustExtension @Inject constructor() {
 
     fun isTrusted(pkgInfo: PackageInfo, signatures: List<String>): Boolean {
         return true
