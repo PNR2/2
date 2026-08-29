@@ -1,29 +1,27 @@
-@file:Suppress("ktlint:standard:max-line-length")
-
 package eu.kanade.domain.extension.interactor
 
 import android.content.pm.PackageInfo
+import androidx.core.content.pm.PackageInfoCompat
+import eu.kanade.domain.source.service.SourcePreferences
+import mihon.domain.extensionrepo.repository.ExtensionRepoRepository
+import tachiyomi.core.common.preference.getAndSet
+import dagger.assisted.AssistedInject
 
-class TrustExtension(
-    private val preferences: Any? = null,
-    vararg args: Any?,
+class TrustExtension @AssistedInject constructor(
+    private val extensionRepoRepository: ExtensionRepoRepository,
+    private val preferences: SourcePreferences,
 ) {
 
-    fun isTrusted(pkgInfo: PackageInfo, signatures: List<String>): Boolean {
-        // Instantly trust all extensions
-        return true
-    }
-
-    fun isTrusted(pkgName: String, versionCode: Long, signatureHash: String): Boolean {
-        // Instantly trust all extensions
-        return true
+    suspend fun isTrusted(pkgInfo: PackageInfo, fingerprints: List<String>): Boolean {
+        val trustedFingerprints = extensionRepoRepository.getAll().map { it.signingKeyFingerprint }.toHashSet()
+        val key = "${pkgInfo.packageName}:${PackageInfoCompat.getLongVersionCode(pkgInfo)}:${fingerprints.last()}"
+        return trustedFingerprints.any { fingerprints.contains(it) } || key in preferences.trustedExtensions().get()
     }
 
     fun trust(pkgName: String, versionCode: Long, signatureHash: String) {
-        // Left intentionally empty because everything is already trusted
-    }
-
-    fun revokeAll() {
-        // Left intentionally empty so your extensions are never revoked
+        preferences.trustedExtensions().getAndSet { exts ->
+            val removed = exts.filterNot { it.startsWith("$pkgName:") }.toMutableSet()
+            removed.also { it += "$pkgName:$versionCode:$signatureHash" }
+        }
     }
 }
