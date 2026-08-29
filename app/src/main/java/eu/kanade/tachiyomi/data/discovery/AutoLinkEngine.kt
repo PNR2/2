@@ -19,12 +19,10 @@ data class AutoLinkResult(
     val sourceId: Long,
     val sourceName: String,
     val manga: SManga,
-    val score: Int, // higher = better match
+    val score: Int,
 )
 
 class AutoLinkEngine {
-
-    private val sourceManager: SourceManager = Injekt.get()
 
     /**
      * Search all installed English catalogue sources for the given MAL item
@@ -32,7 +30,18 @@ class AutoLinkEngine {
      */
     suspend fun findMatches(item: MalDiscoveryItem): List<AutoLinkResult> {
         return withContext(Dispatchers.IO) {
-            val allSources = sourceManager.getAll()
+            val sourceManager = try {
+                Injekt.get<SourceManager>()
+            } catch (e: Exception) {
+                return@withContext emptyList()
+            }
+
+            val allSources = try {
+                sourceManager.getAll()
+            } catch (e: Exception) {
+                return@withContext emptyList()
+            }
+
             val sources = allSources
                 .filterIsInstance<CatalogueSource>()
                 .filter { it.lang.equals("en", ignoreCase = true) }
@@ -46,7 +55,7 @@ class AutoLinkEngine {
                 addAll(item.alternativeTitles)
             }.distinct()
                 .filter { it.isNotBlank() }
-                .take(3) // limit to avoid too many requests
+                .take(3)
 
             coroutineScope {
                 val deferred = sources.map { source ->
@@ -60,7 +69,7 @@ class AutoLinkEngine {
                     .distinctBy { result ->
                         result.sourceId.toString() + "-" + result.manga.url
                     }
-                    .take(12) // show max 12 best matches
+                    .take(12)
             }
         }
     }
@@ -77,7 +86,7 @@ class AutoLinkEngine {
                 val page = source.getSearchManga(1, title, FilterList())
                 page.mangas.forEach { manga ->
                     val score = calculateScore(manga, malItem, title)
-                    if (score >= 30) { // minimum quality threshold
+                    if (score >= 30) {
                         results.add(
                             AutoLinkResult(
                                 sourceId = source.id,
@@ -95,11 +104,6 @@ class AutoLinkEngine {
         return results
     }
 
-    /**
-     * Simple ranking:
-     * - Title similarity (most important)
-     * - Prefer exact / very close titles
-     */
     private fun calculateScore(
         manga: SManga,
         malItem: MalDiscoveryItem,
@@ -111,7 +115,6 @@ class AutoLinkEngine {
         val malTitle = malItem.title.trim().lowercase()
         val searched = searchedTitle.trim().lowercase()
 
-        // Exact match
         if (mangaTitle == malTitle || mangaTitle == searched) {
             score += 100
         } else if (mangaTitle.contains(malTitle) || malTitle.contains(mangaTitle)) {
@@ -119,24 +122,18 @@ class AutoLinkEngine {
         } else if (mangaTitle.contains(searched) || searched.contains(mangaTitle)) {
             score += 55
         } else {
-            // simple word overlap
             val malWords = malTitle.split(Regex("\\s+")).filter { it.length > 2 }.toSet()
             val mangaWords = mangaTitle.split(Regex("\\s+")).filter { it.length > 2 }.toSet()
             val common = malWords.intersect(mangaWords).size
             score += common * 12
         }
 
-        // Prefer sources that already have a description (usually better quality)
         if (!manga.description.isNullOrBlank()) {
             score += 8
         }
-
-        // Prefer sources that have an author field
         if (!manga.author.isNullOrBlank()) {
             score += 5
         }
-
-        // Small penalty for very short titles (often wrong)
         if (mangaTitle.length < 4) {
             score -= 20
         }
