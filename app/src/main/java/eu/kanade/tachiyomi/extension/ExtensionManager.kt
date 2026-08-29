@@ -48,7 +48,7 @@ import java.util.Locale
 class ExtensionManager(
     private val context: Context,
     private val preferences: SourcePreferences,
-    private val trustExtension = TrustExtension()
+    private val trustExtension: TrustExtension,
     private val api: ExtensionApi,
     private val installer: ExtensionInstaller,
     private val extensionUpdateNotifier: ExtensionUpdateNotifier,
