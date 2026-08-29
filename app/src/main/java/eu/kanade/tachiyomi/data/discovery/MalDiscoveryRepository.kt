@@ -78,27 +78,41 @@ class MalDiscoveryRepository {
                                 synopsis = cursor.getString(cursor.getColumnIndexOrThrow("synopsis")),
                                 score = if (scoreIdx >= 0 && !cursor.isNull(scoreIdx)) {
                                     cursor.getDouble(scoreIdx)
-                                } else null,
+                                } else {
+                                    null
+                                },
                                 startDate = cursor.getString(cursor.getColumnIndexOrThrow("start_date")),
                                 isSeasonal = cursor.getInt(cursor.getColumnIndexOrThrow("is_seasonal")) == 1,
                                 sourceId = if (sourceIdIdx >= 0 && !cursor.isNull(sourceIdIdx)) {
                                     cursor.getLong(sourceIdIdx)
-                                } else null,
+                                } else {
+                                    null
+                                },
                                 mangaUrl = if (mangaUrlIdx >= 0 && !cursor.isNull(mangaUrlIdx)) {
                                     cursor.getString(mangaUrlIdx)
-                                } else null,
+                                } else {
+                                    null
+                                },
                                 chapters = if (chaptersIdx >= 0 && !cursor.isNull(chaptersIdx)) {
                                     cursor.getInt(chaptersIdx)
-                                } else null,
+                                } else {
+                                    null
+                                },
                                 status = if (statusIdx >= 0 && !cursor.isNull(statusIdx)) {
                                     cursor.getString(statusIdx)
-                                } else null,
+                                } else {
+                                    null
+                                },
                                 authors = if (authorsIdx >= 0 && !cursor.isNull(authorsIdx)) {
                                     cursor.getString(authorsIdx)
-                                } else null,
+                                } else {
+                                    null
+                                },
                                 genres = if (genresIdx >= 0 && !cursor.isNull(genresIdx)) {
                                     cursor.getString(genresIdx)
-                                } else null,
+                                } else {
+                                    null
+                                },
                             ),
                         )
                     } while (cursor.moveToNext())
