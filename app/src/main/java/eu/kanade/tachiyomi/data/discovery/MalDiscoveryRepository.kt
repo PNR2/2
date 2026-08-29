@@ -65,6 +65,10 @@ class MalDiscoveryRepository {
                         val scoreIdx = cursor.getColumnIndex("score")
                         val sourceIdIdx = cursor.getColumnIndex("source_id")
                         val mangaUrlIdx = cursor.getColumnIndex("manga_url")
+                        val chaptersIdx = cursor.getColumnIndex("chapters")
+                        val statusIdx = cursor.getColumnIndex("status")
+                        val authorsIdx = cursor.getColumnIndex("authors")
+                        val genresIdx = cursor.getColumnIndex("genres")
 
                         list.add(
                             MalDiscoveryItem(
@@ -72,29 +76,29 @@ class MalDiscoveryRepository {
                                 title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
                                 coverUrl = cursor.getString(cursor.getColumnIndexOrThrow("cover_url")),
                                 synopsis = cursor.getString(cursor.getColumnIndexOrThrow("synopsis")),
-                                score = if (scoreIdx >= 0 &&
-                                    !cursor.isNull(scoreIdx)
-                                ) {
+                                score = if (scoreIdx >= 0 && !cursor.isNull(scoreIdx)) {
                                     cursor.getDouble(scoreIdx)
-                                } else {
-                                    null
-                                },
+                                } else null,
                                 startDate = cursor.getString(cursor.getColumnIndexOrThrow("start_date")),
                                 isSeasonal = cursor.getInt(cursor.getColumnIndexOrThrow("is_seasonal")) == 1,
-                                sourceId = if (sourceIdIdx >= 0 &&
-                                    !cursor.isNull(sourceIdIdx)
-                                ) {
+                                sourceId = if (sourceIdIdx >= 0 && !cursor.isNull(sourceIdIdx)) {
                                     cursor.getLong(sourceIdIdx)
-                                } else {
-                                    null
-                                },
-                                mangaUrl = if (mangaUrlIdx >= 0 &&
-                                    !cursor.isNull(mangaUrlIdx)
-                                ) {
+                                } else null,
+                                mangaUrl = if (mangaUrlIdx >= 0 && !cursor.isNull(mangaUrlIdx)) {
                                     cursor.getString(mangaUrlIdx)
-                                } else {
-                                    null
-                                },
+                                } else null,
+                                chapters = if (chaptersIdx >= 0 && !cursor.isNull(chaptersIdx)) {
+                                    cursor.getInt(chaptersIdx)
+                                } else null,
+                                status = if (statusIdx >= 0 && !cursor.isNull(statusIdx)) {
+                                    cursor.getString(statusIdx)
+                                } else null,
+                                authors = if (authorsIdx >= 0 && !cursor.isNull(authorsIdx)) {
+                                    cursor.getString(authorsIdx)
+                                } else null,
+                                genres = if (genresIdx >= 0 && !cursor.isNull(genresIdx)) {
+                                    cursor.getString(genresIdx)
+                                } else null,
                             ),
                         )
                     } while (cursor.moveToNext())
@@ -125,6 +129,10 @@ class MalDiscoveryRepository {
                         put("last_synced", currentTime)
                         put("source_id", manga.sourceId)
                         put("manga_url", manga.mangaUrl)
+                        put("chapters", manga.chapters)
+                        put("status", manga.status)
+                        put("authors", manga.authors)
+                        put("genres", manga.genres)
                     }
                     db.insertWithOnConflict(
                         "mal_discovery_entry",
@@ -140,6 +148,25 @@ class MalDiscoveryRepository {
             refreshFlow()
         } catch (e: Exception) {
             // Ignore so the app does not crash
+        }
+    }
+
+    /** Save the Auto-Link result for a MAL manga */
+    fun saveAutoLink(malId: Long, sourceId: Long, mangaUrl: String) {
+        try {
+            val db = dbHelper.writableDatabase
+            val values = ContentValues().apply {
+                put("source_id", sourceId)
+                put("manga_url", mangaUrl)
+            }
+            db.update(
+                "mal_discovery_entry",
+                values,
+                "mal_id = ?",
+                arrayOf(malId.toString()),
+            )
+            refreshFlow()
+        } catch (_: Exception) {
         }
     }
 
