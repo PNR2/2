@@ -16,7 +16,7 @@ class TrustExtension @Inject constructor() {
     }
 
     fun trust(pkgName: String, versionCode: Long, signatureHash: String) {
-        // no-op
+        // no-op (everything already trusted)
     }
 
     fun revokeAll() {
