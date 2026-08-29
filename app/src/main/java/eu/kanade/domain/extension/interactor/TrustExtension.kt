@@ -3,9 +3,15 @@
 package eu.kanade.domain.extension.interactor
 
 import android.content.pm.PackageInfo
-import javax.inject.Inject
+import dagger.assisted.AssistedInject
+import eu.kanade.domain.source.service.SourcePreferences
+import mihon.domain.extensionrepo.repository.ExtensionRepoRepository
+import tachiyomi.core.common.preference.getAndSet
 
-class TrustExtension @Inject constructor() {
+class TrustExtension @AssistedInject constructor(
+    private val extensionRepoRepository: ExtensionRepoRepository,
+    private val sourcePreferences: SourcePreferences,
+) {
 
     fun isTrusted(pkgInfo: PackageInfo, signatures: List<String>): Boolean {
         return true
@@ -16,10 +22,16 @@ class TrustExtension @Inject constructor() {
     }
 
     fun trust(pkgName: String, versionCode: Long, signatureHash: String) {
-        // no-op (everything already trusted)
+        // mark as trusted in preferences (prevents popup)
+        val trustedSignatures = sourcePreferences.trustedSignatures().get()
+        if (!trustedSignatures.contains(signatureHash)) {
+            sourcePreferences.trustedSignatures().getAndSet {
+                it + signatureHash
+            }
+        }
     }
 
     fun revokeAll() {
-        // no-op
+        // do nothing
     }
 }
