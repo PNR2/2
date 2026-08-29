@@ -1,10 +1,11 @@
-@file:Suppress("ktlint:standard:max-line-length")
-
 package eu.kanade.domain.extension.interactor
 
 import android.content.pm.PackageInfo
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class TrustExtension {
+@Singleton
+class TrustExtension @Inject constructor() {
 
     fun isTrusted(pkgInfo: PackageInfo, signatures: List<String>): Boolean {
         return true
@@ -15,7 +16,7 @@ class TrustExtension {
     }
 
     fun trust(pkgName: String, versionCode: Long, signatureHash: String) {
-        // no-op
+        // no-op (auto trusted)
     }
 
     fun revokeAll() {
