@@ -3,13 +3,14 @@
 package eu.kanade.tachiyomi.data.discovery
 
 import eu.kanade.tachiyomi.source.CatalogueSource
-import eu.kanade.tachiyomi.source.SourceManager
+import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import tachiyomi.domain.source.service.SourceManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import kotlin.math.min
@@ -33,7 +34,7 @@ class AutoLinkEngine {
         return withContext(Dispatchers.IO) {
             val sources = sourceManager.getCatalogueSources()
                 .filter { it.lang.equals("en", ignoreCase = true) }
-                .filter { it is CatalogueSource }
+                .filterIsInstance<CatalogueSource>()
 
             if (sources.isEmpty()) return@withContext emptyList()
 
@@ -42,12 +43,12 @@ class AutoLinkEngine {
                 addAll(item.alternativeTitles)
             }.distinct()
                 .filter { it.isNotBlank() }
-                .take(4) // limit to avoid too many requests
+                .take(3) // limit to avoid too many requests
 
             coroutineScope {
                 sources.map { source ->
                     async {
-                        searchOneSource(source as CatalogueSource, searchTitles, item)
+                        searchOneSource(source, searchTitles, item)
                     }
                 }.awaitAll()
                     .flatten()
@@ -67,7 +68,7 @@ class AutoLinkEngine {
 
         for (title in titles) {
             try {
-                val page = source.getSearchManga(1, title, source.getFilterList())
+                val page = source.getSearchManga(1, title, FilterList())
                 page.mangas.forEach { manga ->
                     val score = calculateScore(manga, malItem, title)
                     if (score >= 30) { // minimum quality threshold
@@ -81,7 +82,6 @@ class AutoLinkEngine {
                         )
                     }
                 }
-                // small delay between searches on same source if needed
             } catch (_: Exception) {
                 // ignore failed sources
             }
@@ -93,7 +93,6 @@ class AutoLinkEngine {
      * Simple ranking:
      * - Title similarity (most important)
      * - Prefer exact / very close titles
-     * - Slight bonus for having chapters / status info later
      */
     private fun calculateScore(
         manga: SManga,
