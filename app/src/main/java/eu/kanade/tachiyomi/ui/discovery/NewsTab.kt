@@ -60,7 +60,6 @@ import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import coil3.compose.AsyncImage
-import eu.kanade.presentation.util.Tab as VoyagerTab
 import eu.kanade.tachiyomi.data.discovery.AutoLinkEngine
 import eu.kanade.tachiyomi.data.discovery.DiscoveryProgressState
 import eu.kanade.tachiyomi.data.discovery.DiscoverySort
@@ -76,6 +75,7 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import eu.kanade.presentation.util.Tab as VoyagerTab
 
 object NewsTab : VoyagerTab {
 
@@ -282,7 +282,11 @@ object NewsTab : VoyagerTab {
                                 navigator.push(GlobalSearchScreen(manga.title))
                             } else if (isAutomationOn) {
                                 // Run Auto-Link
-                                Toast.makeText(context, "Searching extensions for ${manga.title}…", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(
+                                    context,
+                                    "Searching extensions for ${manga.title}…",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
                                 coroutineScope.launch {
                                     try {
                                         val matches = withContext(Dispatchers.IO) {
