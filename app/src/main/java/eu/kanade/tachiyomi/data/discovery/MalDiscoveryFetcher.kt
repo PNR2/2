@@ -24,63 +24,56 @@ class MalDiscoveryFetcher {
 
     suspend fun fetchSeasonalManga(): List<MalDiscoveryItem> {
         return withContext(Dispatchers.IO) {
-            // Try two different endpoints so we have a better chance of getting data
             val urls = listOf(
-                "https://api.jikan.moe/v4/top/manga?filter=publishing&limit=25",
-                "https://api.jikan.moe/v4/manga?status=publishing&order_by=start_date&sort=desc&limit=25",
+                "https://api.jikan.moe/v4/top/manga?filter=publishing&limit=20",
+                "https://api.jikan.moe/v4/manga?status=publishing&order_by=score&sort=desc&limit=20",
             )
 
             for (url in urls) {
                 try {
                     val request = Request.Builder()
                         .url(url)
-                        .header(
-                            "User-Agent",
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                        )
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                         .header("Accept", "application/json")
                         .get()
                         .build()
 
                     val response = client.newCall(request).execute()
-                    val responseBody = response.body?.string()
+                    val body = response.body?.string()
 
-                    if (response.isSuccessful && !responseBody.isNullOrEmpty()) {
-                        val parsed = json.decodeFromString<JikanMangaResponse>(responseBody)
-
+                    if (response.isSuccessful && !body.isNullOrEmpty()) {
+                        val parsed = json.decodeFromString<JikanMangaResponse>(body)
                         if (parsed.data.isNotEmpty()) {
-                            return@withContext parsed.data.map { jikanData ->
-                                val imageUrl = jikanData.images?.jpg?.largeImageUrl
-                                    ?: jikanData.images?.jpg?.imageUrl
-                                    ?: jikanData.images?.webp?.largeImageUrl
-                                    ?: jikanData.images?.webp?.imageUrl
-
+                            return@withContext parsed.data.map { item ->
                                 MalDiscoveryItem(
-                                    malId = jikanData.malId,
-                                    title = jikanData.title,
-                                    coverUrl = imageUrl,
-                                    synopsis = jikanData.synopsis,
-                                    score = jikanData.score,
-                                    startDate = jikanData.published?.from,
+                                    malId = item.malId,
+                                    title = item.title,
+                                    coverUrl = item.images?.jpg?.largeImageUrl
+                                        ?: item.images?.jpg?.imageUrl
+                                        ?: item.images?.webp?.largeImageUrl
+                                        ?: item.images?.webp?.imageUrl,
+                                    synopsis = item.synopsis,
+                                    score = item.score,
+                                    startDate = item.published?.from,
                                     isSeasonal = true,
                                 )
                             }
                         }
                     }
-                } catch (e: Exception) {
-                    // Try next URL
+                } catch (_: Exception) {
+                    // try next
                 }
             }
 
-            // If both endpoints failed, return a visible error item so we know something is wrong
+            // Always return at least one item so we can see if the UI and database work
             listOf(
                 MalDiscoveryItem(
-                    malId = -1,
-                    title = "Could not load seasonal manga",
-                    coverUrl = "",
-                    synopsis = "Both Jikan endpoints failed. Check internet or try again later.",
+                    malId = -999,
+                    title = "TEST - If you see this, database + UI work",
+                    coverUrl = null,
+                    synopsis = "Jikan API failed. This is a test item.",
                     score = 0.0,
-                    startDate = "Error",
+                    startDate = "Test",
                     isSeasonal = true,
                 ),
             )
