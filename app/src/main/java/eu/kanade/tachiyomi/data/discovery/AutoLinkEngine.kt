@@ -37,7 +37,9 @@ class AutoLinkEngine {
                 .filterIsInstance<CatalogueSource>()
                 .filter { it.lang.equals("en", ignoreCase = true) }
 
-            if (sources.isEmpty()) return@withContext emptyList()
+            if (sources.isEmpty()) {
+                return@withContext emptyList()
+            }
 
             val searchTitles = buildList {
                 add(item.title)
@@ -47,14 +49,17 @@ class AutoLinkEngine {
                 .take(3) // limit to avoid too many requests
 
             coroutineScope {
-                sources.map { source ->
+                val deferred = sources.map { source ->
                     async {
                         searchOneSource(source, searchTitles, item)
                     }
-                }.awaitAll()
+                }
+                deferred.awaitAll()
                     .flatten()
                     .sortedByDescending { it.score }
-                    .distinctBy { "\( {it.sourceId}- \){it.manga.url}" }
+                    .distinctBy { result ->
+                        result.sourceId.toString() + "-" + result.manga.url
+                    }
                     .take(12) // show max 12 best matches
             }
         }
@@ -116,4 +121,26 @@ class AutoLinkEngine {
         } else {
             // simple word overlap
             val malWords = malTitle.split(Regex("\\s+")).filter { it.length > 2 }.toSet()
-            val
+            val mangaWords = mangaTitle.split(Regex("\\s+")).filter { it.length > 2 }.toSet()
+            val common = malWords.intersect(mangaWords).size
+            score += common * 12
+        }
+
+        // Prefer sources that already have a description (usually better quality)
+        if (!manga.description.isNullOrBlank()) {
+            score += 8
+        }
+
+        // Prefer sources that have an author field
+        if (!manga.author.isNullOrBlank()) {
+            score += 5
+        }
+
+        // Small penalty for very short titles (often wrong)
+        if (mangaTitle.length < 4) {
+            score -= 20
+        }
+
+        return min(score, 150)
+    }
+}
