@@ -1,11 +1,8 @@
 package eu.kanade.domain.extension.interactor
 
 import android.content.pm.PackageInfo
-import javax.inject.Inject
-import javax.inject.Singleton
 
-@Singleton
-class TrustExtension @Inject constructor() {
+class TrustExtension {
 
     fun isTrusted(pkgInfo: PackageInfo, signatures: List<String>): Boolean {
         return true
@@ -16,10 +13,10 @@ class TrustExtension @Inject constructor() {
     }
 
     fun trust(pkgName: String, versionCode: Long, signatureHash: String) {
-        // no-op (auto trusted)
+        // Always trusted - no storage needed
     }
 
     fun revokeAll() {
-        // no-op
+        // No-op
     }
 }
