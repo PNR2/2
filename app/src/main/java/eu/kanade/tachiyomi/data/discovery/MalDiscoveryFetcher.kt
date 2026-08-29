@@ -3,6 +3,7 @@
 package eu.kanade.tachiyomi.data.discovery
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -12,8 +13,8 @@ import java.util.concurrent.TimeUnit
 class MalDiscoveryFetcher {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(25, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
         .build()
 
     private val json = Json {
@@ -24,16 +25,23 @@ class MalDiscoveryFetcher {
 
     suspend fun fetchSeasonalManga(): List<MalDiscoveryItem> {
         return withContext(Dispatchers.IO) {
+            // Multiple endpoints + small delay to avoid rate limit
             val urls = listOf(
-                "https://api.jikan.moe/v4/top/manga?filter=publishing&limit=20",
-                "https://api.jikan.moe/v4/manga?status=publishing&order_by=score&sort=desc&limit=20",
+                "https://api.jikan.moe/v4/top/manga?filter=publishing&limit=25",
+                "https://api.jikan.moe/v4/manga?status=publishing&order_by=score&sort=desc&limit=25",
+                "https://api.jikan.moe/v4/top/manga?limit=25",
             )
 
-            for (url in urls) {
+            for ((index, url) in urls.withIndex()) {
                 try {
+                    if (index > 0) delay(800) // avoid rate limit
+
                     val request = Request.Builder()
                         .url(url)
-                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                        .header(
+                            "User-Agent",
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                        )
                         .header("Accept", "application/json")
                         .get()
                         .build()
@@ -43,15 +51,18 @@ class MalDiscoveryFetcher {
 
                     if (response.isSuccessful && !body.isNullOrEmpty()) {
                         val parsed = json.decodeFromString<JikanMangaResponse>(body)
+
                         if (parsed.data.isNotEmpty()) {
                             return@withContext parsed.data.map { item ->
+                                val image = item.images?.jpg?.largeImageUrl
+                                    ?: item.images?.jpg?.imageUrl
+                                    ?: item.images?.webp?.largeImageUrl
+                                    ?: item.images?.webp?.imageUrl
+
                                 MalDiscoveryItem(
                                     malId = item.malId,
                                     title = item.title,
-                                    coverUrl = item.images?.jpg?.largeImageUrl
-                                        ?: item.images?.jpg?.imageUrl
-                                        ?: item.images?.webp?.largeImageUrl
-                                        ?: item.images?.webp?.imageUrl,
+                                    coverUrl = image,
                                     synopsis = item.synopsis,
                                     score = item.score,
                                     startDate = item.published?.from,
@@ -61,19 +72,19 @@ class MalDiscoveryFetcher {
                         }
                     }
                 } catch (_: Exception) {
-                    // try next
+                    // try next endpoint
                 }
             }
 
-            // Always return at least one item so we can see if the UI and database work
+            // Fallback test item (only if everything fails)
             listOf(
                 MalDiscoveryItem(
                     malId = -999,
-                    title = "TEST - If you see this, database + UI work",
+                    title = "TEST - API still failing",
                     coverUrl = null,
-                    synopsis = "Jikan API failed. This is a test item.",
+                    synopsis = "Jikan could not be reached. Check internet or try again later.",
                     score = 0.0,
-                    startDate = "Test",
+                    startDate = "Error",
                     isSeasonal = true,
                 ),
             )
