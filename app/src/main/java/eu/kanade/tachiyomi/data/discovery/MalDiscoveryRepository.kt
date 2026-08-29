@@ -72,11 +72,29 @@ class MalDiscoveryRepository {
                                 title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
                                 coverUrl = cursor.getString(cursor.getColumnIndexOrThrow("cover_url")),
                                 synopsis = cursor.getString(cursor.getColumnIndexOrThrow("synopsis")),
-                                score = if (scoreIdx >= 0 && !cursor.isNull(scoreIdx)) cursor.getDouble(scoreIdx) else null,
+                                score = if (scoreIdx >= 0 &&
+                                    !cursor.isNull(scoreIdx)
+                                ) {
+                                    cursor.getDouble(scoreIdx)
+                                } else {
+                                    null
+                                },
                                 startDate = cursor.getString(cursor.getColumnIndexOrThrow("start_date")),
                                 isSeasonal = cursor.getInt(cursor.getColumnIndexOrThrow("is_seasonal")) == 1,
-                                sourceId = if (sourceIdIdx >= 0 && !cursor.isNull(sourceIdIdx)) cursor.getLong(sourceIdIdx) else null,
-                                mangaUrl = if (mangaUrlIdx >= 0 && !cursor.isNull(mangaUrlIdx)) cursor.getString(mangaUrlIdx) else null,
+                                sourceId = if (sourceIdIdx >= 0 &&
+                                    !cursor.isNull(sourceIdIdx)
+                                ) {
+                                    cursor.getLong(sourceIdIdx)
+                                } else {
+                                    null
+                                },
+                                mangaUrl = if (mangaUrlIdx >= 0 &&
+                                    !cursor.isNull(mangaUrlIdx)
+                                ) {
+                                    cursor.getString(mangaUrlIdx)
+                                } else {
+                                    null
+                                },
                             ),
                         )
                     } while (cursor.moveToNext())
@@ -121,7 +139,7 @@ class MalDiscoveryRepository {
             }
             refreshFlow()
         } catch (e: Exception) {
-            // Ignore for now so the app does not crash
+            // Ignore so the app does not crash
         }
     }
 
