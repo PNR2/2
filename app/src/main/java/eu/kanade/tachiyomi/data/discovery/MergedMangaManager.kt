@@ -2,7 +2,6 @@ package eu.kanade.tachiyomi.data.discovery
 
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
-import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -30,7 +29,6 @@ class MergedMangaManager {
         author: String? = null,
         malId: Long? = null,
     ): Long = withContext(Dispatchers.IO) {
-
         // 1. Create the main merged entry
         val mergedId = repository.createMergedManga(
             MergedManga(
@@ -68,7 +66,7 @@ class MergedMangaManager {
                     sourceId = match.sourceId,
                     mangaUrl = match.url,
                     mangaTitle = match.title,
-                    chapterCount = 0, // can be updated later
+                    chapterCount = 0,
                     isInfoSource = false,
                     priority = if (match.lang.equals("en", true)) 10 else 5,
                 ),
