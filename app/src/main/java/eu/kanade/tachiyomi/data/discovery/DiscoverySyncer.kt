@@ -44,7 +44,8 @@ object DiscoverySyncer {
 
                 // Auto-link (Merged Manga)
                 DiscoveryProgressState.update(true, 80, "Auto-linking to extensions...")
-                mangaList.take(8).forEach { manga ->  // limit to 8 so it doesn't take too long
+                // limit to 8 so it doesn't take too long
+                mangaList.take(8).forEach { manga ->
                     try {
                         withTimeoutOrNull(8000) {
                             mergedMangaManager.createOrUpdateMergedManga(
