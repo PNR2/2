@@ -14,7 +14,6 @@ import uy.kohesive.injekt.api.get
 
 class MergedMangaManager {
 
-    private val sourceManager: SourceManager = Injekt.get()
     private val repository = MergedMangaRepository()
 
     /**
@@ -40,7 +39,13 @@ class MergedMangaManager {
             ),
         )
 
-        // 2. Get all online catalogue sources
+        // 2. Get SourceManager only when needed (lazy)
+        val sourceManager: SourceManager = try {
+            Injekt.get()
+        } catch (_: Exception) {
+            return@withContext mergedId
+        }
+
         val sources = sourceManager.getOnlineSources()
             .filterIsInstance<CatalogueSource>()
 
@@ -48,7 +53,7 @@ class MergedMangaManager {
             return@withContext mergedId
         }
 
-        // 3. Search sources (limited and with timeout to avoid long builds / hangs)
+        // 3. Search sources (limited + timeout)
         val searchResults = coroutineScope {
             sources.map { source ->
                 async {
@@ -57,7 +62,7 @@ class MergedMangaManager {
             }.awaitAll()
         }
 
-        // 4. Add the best matches as references
+        // 4. Add matches as references
         searchResults.flatten().forEach { match ->
             repository.addReference(
                 MergedMangaReference(
