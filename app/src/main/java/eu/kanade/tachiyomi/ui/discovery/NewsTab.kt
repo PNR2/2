@@ -4,7 +4,6 @@ package eu.kanade.tachiyomi.ui.discovery
 
 import android.content.Intent
 import android.net.Uri
-import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -60,7 +59,6 @@ import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import coil3.compose.AsyncImage
-import eu.kanade.tachiyomi.data.discovery.AutoLinkEngine
 import eu.kanade.tachiyomi.data.discovery.DiscoveryProgressState
 import eu.kanade.tachiyomi.data.discovery.DiscoverySort
 import eu.kanade.tachiyomi.data.discovery.DiscoverySyncer
@@ -71,7 +69,6 @@ import eu.kanade.tachiyomi.data.discovery.RssNewsRepository
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -145,7 +142,9 @@ object NewsTab : VoyagerTab {
                                     HorizontalDivider()
                                     DropdownMenuItem(
                                         text = {
-                                            Text(if (isAutomationOn) "Turn Off Auto-Link" else "Turn On Auto-Link")
+                                            Text(
+                                                if (isAutomationOn) "Turn Off Auto-Link" else "Turn On Auto-Link",
+                                            )
                                         },
                                         onClick = {
                                             val newState = !isAutomationOn
@@ -209,10 +208,7 @@ object NewsTab : VoyagerTab {
                 if (selectedTabIndex == 0) {
                     NewsList(articles = articles)
                 } else {
-                    SeasonalGrid(
-                        mangaList = seasonalManga,
-                        isAutomationOn = isAutomationOn,
-                    )
+                    SeasonalGrid(mangaList = seasonalManga)
                 }
             }
         }
@@ -248,15 +244,8 @@ object NewsTab : VoyagerTab {
     }
 
     @Composable
-    private fun SeasonalGrid(
-        mangaList: List<MalDiscoveryItem>,
-        isAutomationOn: Boolean,
-    ) {
-        val context = LocalContext.current
+    private fun SeasonalGrid(mangaList: List<MalDiscoveryItem>) {
         val navigator = LocalNavigator.currentOrThrow
-        val coroutineScope = rememberCoroutineScope()
-        val autoLinkEngine = remember { AutoLinkEngine() }
-        val malRepo = remember { MalDiscoveryRepository() }
 
         if (mangaList.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -277,63 +266,9 @@ object NewsTab : VoyagerTab {
                     MangaCard(
                         manga = manga,
                         onClick = {
-                            if (manga.sourceId != null) {
-                                // Already linked → go to global search with the title
-                                navigator.push(GlobalSearchScreen(manga.title))
-                            } else if (isAutomationOn) {
-                                // Run Auto-Link
-                                Toast.makeText(
-                                    context,
-                                    "Searching extensions for ${manga.title}…",
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                                coroutineScope.launch {
-                                    try {
-                                        val matches = withContext(Dispatchers.IO) {
-                                            autoLinkEngine.findMatches(manga)
-                                        }
-                                        if (matches.isNotEmpty()) {
-                                            val best = matches.first()
-                                            // Save the link
-                                            withContext(Dispatchers.IO) {
-                                                malRepo.saveAutoLink(
-                                                    malId = manga.malId,
-                                                    sourceId = best.sourceId,
-                                                    mangaUrl = best.manga.url,
-                                                )
-                                            }
-                                            Toast.makeText(
-                                                context,
-                                                "Linked to ${best.sourceName}",
-                                                Toast.LENGTH_SHORT,
-                                            ).show()
-                                            // Open global search so user can open the manga
-                                            navigator.push(GlobalSearchScreen(best.manga.title))
-                                        } else {
-                                            Toast.makeText(
-                                                context,
-                                                "No matching extension found",
-                                                Toast.LENGTH_SHORT,
-                                            ).show()
-                                            // Fallback to MAL page
-                                            val url = "https://myanimelist.net/manga/${manga.malId}"
-                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                            context.startActivity(intent)
-                                        }
-                                    } catch (e: Exception) {
-                                        Toast.makeText(
-                                            context,
-                                            "Auto-Link failed: ${e.message}",
-                                            Toast.LENGTH_SHORT,
-                                        ).show()
-                                    }
-                                }
-                            } else {
-                                // Automation off → open MAL page
-                                val url = "https://myanimelist.net/manga/${manga.malId}"
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                context.startActivity(intent)
-                            }
+                            // Always open Global Search with the title
+                            // This is the most reliable action right now
+                            navigator.push(GlobalSearchScreen(manga.title))
                         },
                     )
                 }
@@ -418,20 +353,11 @@ object NewsTab : VoyagerTab {
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-
-                    if (manga.sourceId != null) {
-                        Text(
-                            text = "🔗 Linked to Extension",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.tertiary,
-                        )
-                    } else {
-                        Text(
-                            text = if (manga.score != null && manga.score > 0.0) "⭐ ${manga.score}" else "",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
+                    Text(
+                        text = if (manga.score != null && manga.score > 0.0) "⭐ ${manga.score}" else "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
                 }
             }
         }
