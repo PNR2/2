@@ -64,6 +64,8 @@ import eu.kanade.tachiyomi.data.discovery.DiscoverySort
 import eu.kanade.tachiyomi.data.discovery.DiscoverySyncer
 import eu.kanade.tachiyomi.data.discovery.MalDiscoveryItem
 import eu.kanade.tachiyomi.data.discovery.MalDiscoveryRepository
+import eu.kanade.tachiyomi.data.discovery.MergedManga
+import eu.kanade.tachiyomi.data.discovery.MergedMangaRepository
 import eu.kanade.tachiyomi.data.discovery.RssNewsItem
 import eu.kanade.tachiyomi.data.discovery.RssNewsRepository
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
@@ -92,14 +94,16 @@ object NewsTab : VoyagerTab {
         val context = LocalContext.current
         val rssRepo = remember { RssNewsRepository() }
         val malRepo = remember { MalDiscoveryRepository() }
+        val mergedRepo = remember { MergedMangaRepository() }
         val coroutineScope = rememberCoroutineScope()
 
         val articles by rssRepo.subscribeToNews().collectAsState(initial = emptyList())
         val seasonalManga by malRepo.subscribeToSeasonalManga().collectAsState(initial = emptyList())
+        val mergedManga by mergedRepo.subscribeToMergedManga().collectAsState(initial = emptyList())
         val syncProgress by DiscoveryProgressState.progress.collectAsState()
 
         var selectedTabIndex by remember { mutableIntStateOf(0) }
-        val tabs = listOf("News", "Seasonal")
+        val tabs = listOf("News", "Seasonal", "Merged")
 
         var showMenu by remember { mutableStateOf(false) }
         var isAutomationOn by remember { mutableStateOf(MalDiscoveryRepository.isAutomationEnabled()) }
@@ -205,10 +209,10 @@ object NewsTab : VoyagerTab {
                     .fillMaxSize()
                     .padding(paddingValues),
             ) {
-                if (selectedTabIndex == 0) {
-                    NewsList(articles = articles)
-                } else {
-                    SeasonalGrid(mangaList = seasonalManga)
+                when (selectedTabIndex) {
+                    0 -> NewsList(articles = articles)
+                    1 -> SeasonalGrid(mangaList = seasonalManga)
+                    2 -> MergedList(mergedList = mergedManga)
                 }
             }
         }
@@ -264,10 +268,45 @@ object NewsTab : VoyagerTab {
             ) {
                 items(mangaList) { manga ->
                     MangaCard(
-                        manga = manga,
+                        title = manga.title,
+                        coverUrl = manga.coverUrl,
+                        score = manga.score,
                         onClick = {
-                            // Always open Global Search with the title
-                            // This is the most reliable action right now
+                            navigator.push(GlobalSearchScreen(manga.title))
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun MergedList(mergedList: List<MergedManga>) {
+        val navigator = LocalNavigator.currentOrThrow
+
+        if (mergedList.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "No merged manga yet.\nRefresh Seasonal to create some.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                items(mergedList) { manga ->
+                    MangaCard(
+                        title = manga.title,
+                        coverUrl = manga.coverUrl,
+                        score = null,
+                        onClick = {
+                            // For now open Global Search
+                            // Later we will open a proper Merged Manga screen
                             navigator.push(GlobalSearchScreen(manga.title))
                         },
                     )
@@ -330,15 +369,20 @@ object NewsTab : VoyagerTab {
     }
 
     @Composable
-    private fun MangaCard(manga: MalDiscoveryItem, onClick: () -> Unit) {
+    private fun MangaCard(
+        title: String,
+        coverUrl: String?,
+        score: Double?,
+        onClick: () -> Unit,
+    ) {
         Card(
             modifier = Modifier.fillMaxWidth().clickable { onClick() },
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
             Column {
-                if (!manga.coverUrl.isNullOrEmpty()) {
+                if (!coverUrl.isNullOrEmpty()) {
                     AsyncImage(
-                        model = manga.coverUrl,
+                        model = coverUrl,
                         contentDescription = "Manga Cover",
                         modifier = Modifier.fillMaxWidth().height(220.dp),
                         contentScale = ContentScale.Crop,
@@ -346,18 +390,20 @@ object NewsTab : VoyagerTab {
                 }
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = manga.title,
+                        text = title,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = if (manga.score != null && manga.score > 0.0) "⭐ ${manga.score}" else "",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    if (score != null && score > 0.0) {
+                        Text(
+                            text = "⭐ $score",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
         }
