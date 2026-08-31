@@ -17,8 +17,8 @@ class MergedMangaManager {
     private val repository = MergedMangaRepository()
 
     /**
-     * Creates a merged manga entry and tries to link it to matching extension sources.
-     * Prefer English sources.
+     * Creates a merged manga entry and links the best matching extension results.
+     * Prefers English sources and cleaner title matches.
      */
     suspend fun createOrUpdateMergedManga(
         title: String,
@@ -39,7 +39,7 @@ class MergedMangaManager {
             ),
         )
 
-        // 2. Get SourceManager only when needed (lazy)
+        // 2. Get SourceManager safely
         val sourceManager: SourceManager = try {
             Injekt.get()
         } catch (_: Exception) {
@@ -48,34 +48,48 @@ class MergedMangaManager {
 
         val sources = sourceManager.getOnlineSources()
             .filterIsInstance<CatalogueSource>()
+            .sortedByDescending { it.lang.equals("en", ignoreCase = true) } // English first
+            .take(25) // limit to keep it reasonably fast
 
         if (sources.isEmpty()) {
             return@withContext mergedId
         }
 
-        // 3. Search sources (limited + timeout)
+        val cleanTitle = cleanTitle(title)
+
+        // 3. Search sources in parallel
         val searchResults = coroutineScope {
             sources.map { source ->
                 async {
-                    searchInSource(source, title)
+                    searchInSource(source, cleanTitle)
                 }
             }.awaitAll()
         }
 
-        // 4. Add matches as references
-        searchResults.flatten().forEach { match ->
-            repository.addReference(
-                MergedMangaReference(
-                    mergedId = mergedId,
-                    sourceId = match.sourceId,
-                    mangaUrl = match.url,
-                    mangaTitle = match.title,
-                    chapterCount = 0,
-                    isInfoSource = false,
-                    priority = if (match.lang.equals("en", ignoreCase = true)) 10 else 5,
-                ),
-            )
-        }
+        // 4. Filter and add good matches
+        searchResults.flatten()
+            .filter { isGoodMatch(cleanTitle, it.title) }
+            .sortedByDescending { match ->
+                // Higher score = better
+                var score = 0
+                if (match.lang.equals("en", ignoreCase = true)) score += 20
+                if (cleanTitle.equals(cleanTitle(match.title), ignoreCase = true)) score += 15
+                score
+            }
+            .take(12) // max 12 references per merged manga
+            .forEach { match ->
+                repository.addReference(
+                    MergedMangaReference(
+                        mergedId = mergedId,
+                        sourceId = match.sourceId,
+                        mangaUrl = match.url,
+                        mangaTitle = match.title,
+                        chapterCount = 0,
+                        isInfoSource = false,
+                        priority = if (match.lang.equals("en", ignoreCase = true)) 10 else 5,
+                    ),
+                )
+            }
 
         mergedId
     }
@@ -85,9 +99,9 @@ class MergedMangaManager {
         title: String,
     ): List<SearchMatch> {
         return try {
-            withTimeoutOrNull(3500) {
+            withTimeoutOrNull(3000) {
                 val result = source.getSearchManga(1, title, FilterList())
-                result.mangas.take(2).map { manga ->
+                result.mangas.take(3).map { manga ->
                     SearchMatch(
                         sourceId = source.id,
                         url = manga.url,
@@ -99,6 +113,30 @@ class MergedMangaManager {
         } catch (_: Exception) {
             emptyList()
         }
+    }
+
+    private fun cleanTitle(title: String): String {
+        return title
+            .lowercase()
+            .replace(Regex("[^a-z0-9\\s]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun isGoodMatch(searchTitle: String, resultTitle: String): Boolean {
+        val cleanResult = cleanTitle(resultTitle)
+        if (cleanResult.isBlank()) return false
+
+        // Exact match after cleaning
+        if (cleanResult == searchTitle) return true
+
+        // Contains the main title
+        if (cleanResult.contains(searchTitle) || searchTitle.contains(cleanResult)) return true
+
+        // Very short titles are risky – skip them
+        if (cleanResult.length < 4) return false
+
+        return false
     }
 
     private data class SearchMatch(
