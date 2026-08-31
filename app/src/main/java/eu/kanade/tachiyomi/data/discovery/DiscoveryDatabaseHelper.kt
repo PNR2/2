@@ -6,7 +6,7 @@ import android.database.sqlite.SQLiteOpenHelper
 
 class DiscoveryDatabaseHelper(
     app: Application,
-) : SQLiteOpenHelper(app, "musyomi_discovery.db", null, 4) {
+) : SQLiteOpenHelper(app, "musyomi_discovery.db", null, 5) {
 
     override fun onCreate(db: SQLiteDatabase) {
         // RSS News
@@ -83,6 +83,23 @@ class DiscoveryDatabaseHelper(
             )
             """.trimIndent(),
         )
+
+        // Chapters belonging to a merged manga
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS merged_chapter (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                merged_id INTEGER NOT NULL,
+                source_id INTEGER NOT NULL,
+                url TEXT NOT NULL,
+                name TEXT NOT NULL,
+                chapter_number REAL DEFAULT -1,
+                language TEXT,
+                date_upload INTEGER DEFAULT 0,
+                UNIQUE(merged_id, source_id, url)
+            )
+            """.trimIndent(),
+        )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -135,6 +152,23 @@ class DiscoveryDatabaseHelper(
                     is_info_source INTEGER DEFAULT 0,
                     priority INTEGER DEFAULT 0,
                     UNIQUE(merged_id, source_id, manga_url)
+                )
+                """.trimIndent(),
+            )
+        }
+        if (oldVersion < 5) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS merged_chapter (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    merged_id INTEGER NOT NULL,
+                    source_id INTEGER NOT NULL,
+                    url TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    chapter_number REAL DEFAULT -1,
+                    language TEXT,
+                    date_upload INTEGER DEFAULT 0,
+                    UNIQUE(merged_id, source_id, url)
                 )
                 """.trimIndent(),
             )
