@@ -305,9 +305,8 @@ object NewsTab : VoyagerTab {
                         coverUrl = manga.coverUrl,
                         score = null,
                         onClick = {
-                            // For now open Global Search
-                            // Later we will open a proper Merged Manga screen
-                            navigator.push(GlobalSearchScreen(manga.title))
+                            // Open the new Merged Manga detail screen
+                            navigator.push(MergedMangaScreen(manga))
                         },
                     )
                 }
