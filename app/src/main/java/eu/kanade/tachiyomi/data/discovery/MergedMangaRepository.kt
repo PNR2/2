@@ -34,6 +34,17 @@ data class MergedMangaReference(
     val priority: Int = 0,
 )
 
+data class MergedChapter(
+    val id: Long = 0,
+    val mergedId: Long,
+    val sourceId: Long,
+    val url: String,
+    val name: String,
+    val chapterNumber: Float = -1f,
+    val language: String? = null,
+    val dateUpload: Long = 0,
+)
+
 class MergedMangaRepository {
 
     companion object {
@@ -127,6 +138,47 @@ class MergedMangaRepository {
         )
     }
 
+    fun updateReferenceChapterCount(mergedId: Long, sourceId: Long, mangaUrl: String, count: Int) {
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put("chapter_count", count)
+        }
+        db.update(
+            "merged_manga_reference",
+            values,
+            "merged_id = ? AND source_id = ? AND manga_url = ?",
+            arrayOf(mergedId.toString(), sourceId.toString(), mangaUrl),
+        )
+    }
+
+    fun addChapters(chapters: List<MergedChapter>) {
+        if (chapters.isEmpty()) return
+        val db = dbHelper.writableDatabase
+        db.beginTransaction()
+        try {
+            chapters.forEach { chapter ->
+                val values = ContentValues().apply {
+                    put("merged_id", chapter.mergedId)
+                    put("source_id", chapter.sourceId)
+                    put("url", chapter.url)
+                    put("name", chapter.name)
+                    put("chapter_number", chapter.chapterNumber)
+                    put("language", chapter.language)
+                    put("date_upload", chapter.dateUpload)
+                }
+                db.insertWithOnConflict(
+                    "merged_chapter",
+                    null,
+                    values,
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     fun getReferences(mergedId: Long): List<MergedMangaReference> {
         val list = mutableListOf<MergedMangaReference>()
         try {
@@ -148,6 +200,37 @@ class MergedMangaRepository {
                             chapterCount = cursor.getInt(cursor.getColumnIndexOrThrow("chapter_count")),
                             isInfoSource = cursor.getInt(cursor.getColumnIndexOrThrow("is_info_source")) == 1,
                             priority = cursor.getInt(cursor.getColumnIndexOrThrow("priority")),
+                        ),
+                    )
+                } while (cursor.moveToNext())
+            }
+            cursor.close()
+        } catch (_: Exception) {
+        }
+        return list
+    }
+
+    fun getChapters(mergedId: Long): List<MergedChapter> {
+        val list = mutableListOf<MergedChapter>()
+        try {
+            val db = dbHelper.readableDatabase
+            val cursor = db.rawQuery(
+                "SELECT * FROM merged_chapter WHERE merged_id = ? ORDER BY chapter_number ASC, date_upload ASC",
+                arrayOf(mergedId.toString()),
+            )
+
+            if (cursor.moveToFirst()) {
+                do {
+                    list.add(
+                        MergedChapter(
+                            id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
+                            mergedId = cursor.getLong(cursor.getColumnIndexOrThrow("merged_id")),
+                            sourceId = cursor.getLong(cursor.getColumnIndexOrThrow("source_id")),
+                            url = cursor.getString(cursor.getColumnIndexOrThrow("url")),
+                            name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
+                            chapterNumber = cursor.getFloat(cursor.getColumnIndexOrThrow("chapter_number")),
+                            language = cursor.getString(cursor.getColumnIndexOrThrow("language")),
+                            dateUpload = cursor.getLong(cursor.getColumnIndexOrThrow("date_upload")),
                         ),
                     )
                 } while (cursor.moveToNext())
