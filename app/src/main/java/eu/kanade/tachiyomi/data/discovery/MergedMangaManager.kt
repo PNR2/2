@@ -18,9 +18,8 @@ class MergedMangaManager {
     private val repository = MergedMangaRepository()
 
     /**
-     * Main function.
-     * Call this when you want to auto-link a manga (from Seasonal or anywhere).
-     * It searches all extensions, creates a merged entry, and links the best matches.
+     * Creates a merged manga entry and tries to link it to matching extension sources.
+     * Prefer English sources.
      */
     suspend fun createOrUpdateMergedManga(
         title: String,
@@ -49,7 +48,7 @@ class MergedMangaManager {
             return@withContext mergedId
         }
 
-        // 3. Search all sources in parallel (with timeout)
+        // 3. Search sources (limited and with timeout to avoid long builds / hangs)
         val searchResults = coroutineScope {
             sources.map { source ->
                 async {
@@ -58,7 +57,7 @@ class MergedMangaManager {
             }.awaitAll()
         }
 
-        // 4. Flatten and add good matches as references
+        // 4. Add the best matches as references
         searchResults.flatten().forEach { match ->
             repository.addReference(
                 MergedMangaReference(
@@ -68,7 +67,7 @@ class MergedMangaManager {
                     mangaTitle = match.title,
                     chapterCount = 0,
                     isInfoSource = false,
-                    priority = if (match.lang.equals("en", true)) 10 else 5,
+                    priority = if (match.lang.equals("en", ignoreCase = true)) 10 else 5,
                 ),
             )
         }
@@ -81,9 +80,9 @@ class MergedMangaManager {
         title: String,
     ): List<SearchMatch> {
         return try {
-            withTimeoutOrNull(4000) {
+            withTimeoutOrNull(3500) {
                 val result = source.getSearchManga(1, title, FilterList())
-                result.mangas.take(3).map { manga ->
+                result.mangas.take(2).map { manga ->
                     SearchMatch(
                         sourceId = source.id,
                         url = manga.url,
@@ -92,7 +91,7 @@ class MergedMangaManager {
                     )
                 }
             } ?: emptyList()
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             emptyList()
         }
     }
