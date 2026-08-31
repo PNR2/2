@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.ui.discovery
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -126,7 +127,6 @@ data class MergedMangaScreen(
                         SourceCard(
                             reference = ref,
                             onClick = {
-                                // Open Global Search with the original title for now
                                 navigator.push(GlobalSearchScreen(mergedManga.title))
                             },
                         )
@@ -169,12 +169,4 @@ data class MergedMangaScreen(
             }
         }
     }
-}
-
-// Small helper because clickable is needed
-@Composable
-private fun Modifier.clickable(onClick: () -> Unit): Modifier {
-    return this.then(
-        androidx.compose.foundation.clickable(onClick = onClick),
-    )
 }
