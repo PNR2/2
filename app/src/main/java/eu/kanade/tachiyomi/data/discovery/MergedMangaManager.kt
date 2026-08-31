@@ -16,10 +16,6 @@ class MergedMangaManager {
 
     private val repository = MergedMangaRepository()
 
-    /**
-     * Creates a merged manga entry and links the best matching extension results.
-     * Chapter fetching will be added in the next step with the correct API.
-     */
     suspend fun createOrUpdateMergedManga(
         title: String,
         coverUrl: String? = null,
@@ -27,7 +23,7 @@ class MergedMangaManager {
         author: String? = null,
         malId: Long? = null,
     ): Long = withContext(Dispatchers.IO) {
-        // 1. Create the main merged entry
+        // 1. Create merged entry
         val mergedId = repository.createMergedManga(
             MergedManga(
                 title = title,
@@ -39,7 +35,7 @@ class MergedMangaManager {
             ),
         )
 
-        // 2. Get SourceManager safely
+        // 2. Get sources
         val sourceManager: SourceManager = try {
             Injekt.get()
         } catch (_: Exception) {
@@ -49,34 +45,35 @@ class MergedMangaManager {
         val sources = sourceManager.getOnlineSources()
             .filterIsInstance<CatalogueSource>()
             .sortedByDescending { it.lang.equals("en", ignoreCase = true) }
-            .take(20)
+            .take(30) // search more sources
 
-        if (sources.isEmpty()) {
-            return@withContext mergedId
-        }
+        if (sources.isEmpty()) return@withContext mergedId
 
         val cleanTitle = cleanTitle(title)
 
-        // 3. Search sources
+        // 3. Search
         val searchResults = coroutineScope {
             sources.map { source ->
                 async {
-                    searchInSource(source, cleanTitle)
+                    searchInSource(source, title) // use original title too
                 }
             }.awaitAll()
         }
 
-        // 4. Filter good matches and save references
+        // 4. Accept more matches (less strict)
         val goodMatches = searchResults.flatten()
-            .filter { isGoodMatch(cleanTitle, it.title) }
+            .filter { isAcceptableMatch(cleanTitle, it.title) }
+            .distinctBy { "${it.sourceId}_${it.url}" }
             .sortedByDescending { match ->
                 var score = 0
-                if (match.lang.equals("en", ignoreCase = true)) score += 20
-                if (cleanTitle == cleanTitle(match.title)) score += 15
+                if (match.lang.equals("en", ignoreCase = true)) score += 30
+                if (cleanTitle(match.title).contains(cleanTitle)) score += 20
+                if (cleanTitle == cleanTitle(match.title)) score += 25
                 score
             }
-            .take(10)
+            .take(15)
 
+        // 5. Save references
         goodMatches.forEach { match ->
             repository.addReference(
                 MergedMangaReference(
@@ -86,7 +83,7 @@ class MergedMangaManager {
                     mangaTitle = match.title,
                     chapterCount = 0,
                     isInfoSource = false,
-                    priority = if (match.lang.equals("en", ignoreCase = true)) 10 else 5,
+                    priority = if (match.lang.equals("en", ignoreCase = true)) 10 else 4,
                 ),
             )
         }
@@ -99,9 +96,9 @@ class MergedMangaManager {
         title: String,
     ): List<SearchMatch> {
         return try {
-            withTimeoutOrNull(3000) {
+            withTimeoutOrNull(4000) {
                 val result = source.getSearchManga(1, title, FilterList())
-                result.mangas.take(3).map { manga ->
+                result.mangas.take(4).map { manga ->
                     SearchMatch(
                         sourceId = source.id,
                         url = manga.url,
@@ -116,19 +113,25 @@ class MergedMangaManager {
     }
 
     private fun cleanTitle(title: String): String {
-        return title
-            .lowercase()
+        return title.lowercase()
             .replace(Regex("[^a-z0-9\\s]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
     }
 
-    private fun isGoodMatch(searchTitle: String, resultTitle: String): Boolean {
+    private fun isAcceptableMatch(searchTitle: String, resultTitle: String): Boolean {
         val cleanResult = cleanTitle(resultTitle)
-        if (cleanResult.isBlank() || cleanResult.length < 3) return false
-        if (cleanResult == searchTitle) return true
-        if (cleanResult.contains(searchTitle) || searchTitle.contains(cleanResult)) return true
-        return false
+        if (cleanResult.length < 3) return false
+
+        // Very loose matching so we get more links
+        if (cleanResult.contains(searchTitle)) return true
+        if (searchTitle.contains(cleanResult)) return true
+
+        // Check first few words
+        val searchWords = searchTitle.split(" ").filter { it.length > 2 }
+        val resultWords = cleanResult.split(" ").filter { it.length > 2 }
+        val common = searchWords.count { word -> resultWords.any { it.contains(word) || word.contains(it) } }
+        return common >= 1
     }
 
     private data class SearchMatch(
