@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.data.discovery
 
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -17,8 +18,7 @@ class MergedMangaManager {
     private val repository = MergedMangaRepository()
 
     /**
-     * Creates a merged manga entry and links the best matching extension results.
-     * Prefers English sources and cleaner title matches.
+     * Creates a merged manga entry, links the best sources, and tries to collect chapters.
      */
     suspend fun createOrUpdateMergedManga(
         title: String,
@@ -48,8 +48,8 @@ class MergedMangaManager {
 
         val sources = sourceManager.getOnlineSources()
             .filterIsInstance<CatalogueSource>()
-            .sortedByDescending { it.lang.equals("en", ignoreCase = true) } // English first
-            .take(25) // limit to keep it reasonably fast
+            .sortedByDescending { it.lang.equals("en", ignoreCase = true) }
+            .take(20)
 
         if (sources.isEmpty()) {
             return@withContext mergedId
@@ -57,7 +57,7 @@ class MergedMangaManager {
 
         val cleanTitle = cleanTitle(title)
 
-        // 3. Search sources in parallel
+        // 3. Search sources
         val searchResults = coroutineScope {
             sources.map { source ->
                 async {
@@ -66,30 +66,64 @@ class MergedMangaManager {
             }.awaitAll()
         }
 
-        // 4. Filter and add good matches
-        searchResults.flatten()
+        // 4. Filter good matches and save references
+        val goodMatches = searchResults.flatten()
             .filter { isGoodMatch(cleanTitle, it.title) }
             .sortedByDescending { match ->
-                // Higher score = better
                 var score = 0
                 if (match.lang.equals("en", ignoreCase = true)) score += 20
-                if (cleanTitle.equals(cleanTitle(match.title), ignoreCase = true)) score += 15
+                if (cleanTitle == cleanTitle(match.title)) score += 15
                 score
             }
-            .take(12) // max 12 references per merged manga
-            .forEach { match ->
-                repository.addReference(
-                    MergedMangaReference(
+            .take(10)
+
+        goodMatches.forEach { match ->
+            repository.addReference(
+                MergedMangaReference(
+                    mergedId = mergedId,
+                    sourceId = match.sourceId,
+                    mangaUrl = match.url,
+                    mangaTitle = match.title,
+                    chapterCount = 0,
+                    isInfoSource = false,
+                    priority = if (match.lang.equals("en", ignoreCase = true)) 10 else 5,
+                ),
+            )
+        }
+
+        // 5. Try to fetch chapters from the best few matches
+        goodMatches.take(4).forEach { match ->
+            try {
+                val source = sources.find { it.id == match.sourceId } ?: return@forEach
+                val chapters = fetchChaptersFromSource(source, match.url, match.lang)
+
+                if (chapters.isNotEmpty()) {
+                    // Save chapter count on the reference
+                    repository.updateReferenceChapterCount(
                         mergedId = mergedId,
                         sourceId = match.sourceId,
                         mangaUrl = match.url,
-                        mangaTitle = match.title,
-                        chapterCount = 0,
-                        isInfoSource = false,
-                        priority = if (match.lang.equals("en", ignoreCase = true)) 10 else 5,
-                    ),
-                )
+                        count = chapters.size,
+                    )
+
+                    // Save the actual chapters
+                    val mergedChapters = chapters.map { ch ->
+                        MergedChapter(
+                            mergedId = mergedId,
+                            sourceId = match.sourceId,
+                            url = ch.url,
+                            name = ch.name,
+                            chapterNumber = ch.chapterNumber,
+                            language = match.lang,
+                            dateUpload = ch.dateUpload,
+                        )
+                    }
+                    repository.addChapters(mergedChapters)
+                }
+            } catch (_: Exception) {
+                // ignore individual source failures
             }
+        }
 
         mergedId
     }
@@ -115,6 +149,33 @@ class MergedMangaManager {
         }
     }
 
+    private suspend fun fetchChaptersFromSource(
+        source: CatalogueSource,
+        mangaUrl: String,
+        language: String,
+    ): List<ChapterInfo> {
+        return try {
+            withTimeoutOrNull(5000) {
+                val sManga = SManga.create().apply {
+                    url = mangaUrl
+                }
+                val details = source.getMangaDetails(sManga)
+                val chapterList = source.getChapterList(details)
+
+                chapterList.map { ch ->
+                    ChapterInfo(
+                        url = ch.url,
+                        name = ch.name,
+                        chapterNumber = ch.chapter_number,
+                        dateUpload = ch.date_upload,
+                    )
+                }
+            } ?: emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     private fun cleanTitle(title: String): String {
         return title
             .lowercase()
@@ -125,17 +186,9 @@ class MergedMangaManager {
 
     private fun isGoodMatch(searchTitle: String, resultTitle: String): Boolean {
         val cleanResult = cleanTitle(resultTitle)
-        if (cleanResult.isBlank()) return false
-
-        // Exact match after cleaning
+        if (cleanResult.isBlank() || cleanResult.length < 3) return false
         if (cleanResult == searchTitle) return true
-
-        // Contains the main title
         if (cleanResult.contains(searchTitle) || searchTitle.contains(cleanResult)) return true
-
-        // Very short titles are risky – skip them
-        if (cleanResult.length < 4) return false
-
         return false
     }
 
@@ -144,5 +197,12 @@ class MergedMangaManager {
         val url: String,
         val title: String,
         val lang: String,
+    )
+
+    private data class ChapterInfo(
+        val url: String,
+        val name: String,
+        val chapterNumber: Float,
+        val dateUpload: Long,
     )
 }
