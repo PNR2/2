@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -23,7 +24,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -33,9 +38,13 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
 import eu.kanade.tachiyomi.data.discovery.MergedManga
+import eu.kanade.tachiyomi.data.discovery.MergedMangaManager
 import eu.kanade.tachiyomi.data.discovery.MergedMangaReference
 import eu.kanade.tachiyomi.data.discovery.MergedMangaRepository
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class MergedMangaScreen(
     private val mergedManga: MergedManga,
@@ -46,7 +55,14 @@ data class MergedMangaScreen(
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
         val repository = remember { MergedMangaRepository() }
-        val references = remember { repository.getReferences(mergedManga.id) }
+        val manager = remember { MergedMangaManager() }
+        val scope = rememberCoroutineScope()
+
+        var references by remember {
+            mutableStateOf(repository.getReferences(mergedManga.id))
+        }
+        var isRelinking by remember { mutableStateOf(false) }
+        var statusText by remember { mutableStateOf("") }
 
         Scaffold(
             topBar = {
@@ -67,7 +83,6 @@ data class MergedMangaScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                // Cover + basic info
                 item {
                     if (!mergedManga.coverUrl.isNullOrEmpty()) {
                         AsyncImage(
@@ -87,14 +102,6 @@ data class MergedMangaScreen(
                         fontWeight = FontWeight.Bold,
                     )
 
-                    if (!mergedManga.author.isNullOrEmpty()) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Author: ${mergedManga.author}",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-
                     if (!mergedManga.synopsis.isNullOrEmpty()) {
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
@@ -103,9 +110,52 @@ data class MergedMangaScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = {
+                            if (isRelinking) return@Button
+                            isRelinking = true
+                            statusText = "Searching extensions..."
+                            scope.launch {
+                                try {
+                                    withContext(Dispatchers.IO) {
+                                        manager.createOrUpdateMergedManga(
+                                            title = mergedManga.title,
+                                            coverUrl = mergedManga.coverUrl,
+                                            synopsis = mergedManga.synopsis,
+                                            author = mergedManga.author,
+                                            malId = mergedManga.malId,
+                                        )
+                                    }
+                                    // Refresh list (note: this creates a new entry, 
+                                    // so we re-query by title would be better later)
+                                    references = repository.getReferences(mergedManga.id)
+                                    statusText = "Done. Sources found: ${references.size}"
+                                } catch (e: Exception) {
+                                    statusText = "Error: ${e.message}"
+                                } finally {
+                                    isRelinking = false
+                                }
+                            }
+                        },
+                        enabled = !isRelinking,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (isRelinking) "Linking..." else "Re-link now")
+                    }
+
+                    if (statusText.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
 
-                // Linked sources section
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
@@ -118,7 +168,7 @@ data class MergedMangaScreen(
                 if (references.isEmpty()) {
                     item {
                         Text(
-                            text = "No sources linked yet.",
+                            text = "No sources linked yet. Tap \"Re-link now\".",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -159,13 +209,6 @@ data class MergedMangaScreen(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (reference.chapterCount > 0) {
-                    Text(
-                        text = "Chapters: ${reference.chapterCount}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
             }
         }
     }
