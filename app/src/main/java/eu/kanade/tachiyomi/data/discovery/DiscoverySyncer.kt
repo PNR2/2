@@ -42,12 +42,12 @@ object DiscoverySyncer {
                 DiscoveryProgressState.update(true, 65, "Saving seasonal manga...")
                 malRepository.insertSeasonalManga(mangaList)
 
-                // Auto-link (Merged Manga)
-                DiscoveryProgressState.update(true, 80, "Auto-linking to extensions...")
-                // limit to 8 so it doesn't take too long
-                mangaList.take(8).forEach { manga ->
+                // Auto-link to cohesive entries
+                DiscoveryProgressState.update(true, 80, "Creating cohesive entries...")
+                // Limit to avoid very long sync
+                mangaList.take(10).forEach { manga ->
                     try {
-                        withTimeoutOrNull(8000) {
+                        withTimeoutOrNull(10000) {
                             mergedMangaManager.createOrUpdateMergedManga(
                                 title = manga.title,
                                 coverUrl = manga.coverUrl,
