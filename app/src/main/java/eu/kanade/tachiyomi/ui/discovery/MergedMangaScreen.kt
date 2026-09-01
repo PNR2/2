@@ -129,8 +129,7 @@ data class MergedMangaScreen(
                                             malId = mergedManga.malId,
                                         )
                                     }
-                                    // Refresh list (note: this creates a new entry, 
-                                    // so we re-query by title would be better later)
+                                    // Refresh list
                                     references = repository.getReferences(mergedManga.id)
                                     statusText = "Done. Sources found: ${references.size}"
                                 } catch (e: Exception) {
