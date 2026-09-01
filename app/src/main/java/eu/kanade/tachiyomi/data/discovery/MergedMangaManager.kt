@@ -23,7 +23,6 @@ class MergedMangaManager {
         author: String? = null,
         malId: Long? = null,
     ): Long = withContext(Dispatchers.IO) {
-        // Create merged entry
         val mergedId = repository.createMergedManga(
             MergedManga(
                 title = title,
@@ -43,12 +42,10 @@ class MergedMangaManager {
 
         val sources = sourceManager.getOnlineSources()
             .filterIsInstance<CatalogueSource>()
-            .sortedByDescending { it.lang.equals("en", ignoreCase = true) }
-            .take(35)
+            .take(40)
 
         if (sources.isEmpty()) return@withContext mergedId
 
-        // Search with original title (better results)
         val searchResults = coroutineScope {
             sources.map { source ->
                 async {
@@ -57,25 +54,10 @@ class MergedMangaManager {
             }.awaitAll()
         }
 
-        val allMatches = searchResults.flatten()
+        // Accept almost everything for now
+        val accepted = searchResults.flatten()
             .distinctBy { "${it.sourceId}_${it.url}" }
-
-        // Very tolerant filter – we want links
-        val accepted = allMatches
-            .filter { match ->
-                val cleanSearch = clean(title)
-                val cleanResult = clean(match.title)
-                cleanResult.contains(cleanSearch.take(6)) ||
-                    cleanSearch.contains(cleanResult.take(6)) ||
-                    cleanResult.split(" ").any { it.length > 3 && cleanSearch.contains(it) }
-            }
-            .sortedByDescending { match ->
-                var score = 0
-                if (match.lang.equals("en", ignoreCase = true)) score += 50
-                if (clean(match.title).contains(clean(title))) score += 30
-                score
-            }
-            .take(20)
+            .take(25)
 
         accepted.forEach { match ->
             repository.addReference(
@@ -99,9 +81,9 @@ class MergedMangaManager {
         title: String,
     ): List<SearchMatch> {
         return try {
-            withTimeoutOrNull(4500) {
+            withTimeoutOrNull(5000) {
                 val result = source.getSearchManga(1, title, FilterList())
-                result.mangas.take(5).map { manga ->
+                result.mangas.take(6).map { manga ->
                     SearchMatch(
                         sourceId = source.id,
                         url = manga.url,
@@ -113,13 +95,6 @@ class MergedMangaManager {
         } catch (_: Exception) {
             emptyList()
         }
-    }
-
-    private fun clean(text: String): String {
-        return text.lowercase()
-            .replace(Regex("[^a-z0-9\\s]"), "")
-            .replace(Regex("\\s+"), " ")
-            .trim()
     }
 
     private data class SearchMatch(
