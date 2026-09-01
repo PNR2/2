@@ -99,8 +99,40 @@ class MergedMangaRepository {
         }
     }
 
-    fun createMergedManga(manga: MergedManga): Long {
+    /**
+     * Create or update a merged manga.
+     * If an entry with the same malId or same title already exists, it is updated.
+     * Returns the id of the entry.
+     */
+    fun createOrUpdateMergedManga(manga: MergedManga): Long {
         val db = dbHelper.writableDatabase
+        val now = System.currentTimeMillis()
+
+        // Try to find existing entry
+        var existingId: Long? = null
+
+        if (manga.malId != null && manga.malId > 0) {
+            val cursor = db.rawQuery(
+                "SELECT id FROM merged_manga WHERE mal_id = ? LIMIT 1",
+                arrayOf(manga.malId.toString()),
+            )
+            if (cursor.moveToFirst()) {
+                existingId = cursor.getLong(0)
+            }
+            cursor.close()
+        }
+
+        if (existingId == null) {
+            val cursor = db.rawQuery(
+                "SELECT id FROM merged_manga WHERE title = ? COLLATE NOCASE LIMIT 1",
+                arrayOf(manga.title),
+            )
+            if (cursor.moveToFirst()) {
+                existingId = cursor.getLong(0)
+            }
+            cursor.close()
+        }
+
         val values = ContentValues().apply {
             put("title", manga.title)
             put("cover_url", manga.coverUrl)
@@ -111,12 +143,31 @@ class MergedMangaRepository {
             put("genres", manga.genres)
             put("mal_id", manga.malId)
             put("preferred_language", manga.preferredLanguage)
-            put("created_at", manga.createdAt)
-            put("updated_at", manga.updatedAt)
+            put("updated_at", now)
         }
-        val id = db.insert("merged_manga", null, values)
-        refreshFlow()
-        return id
+
+        return if (existingId != null) {
+            // Update existing
+            db.update(
+                "merged_manga",
+                values,
+                "id = ?",
+                arrayOf(existingId.toString()),
+            )
+            refreshFlow()
+            existingId
+        } else {
+            // Insert new
+            values.put("created_at", now)
+            val id = db.insert("merged_manga", null, values)
+            refreshFlow()
+            id
+        }
+    }
+
+    // Keep old name working for compatibility
+    fun createMergedManga(manga: MergedManga): Long {
+        return createOrUpdateMergedManga(manga)
     }
 
     fun addReference(ref: MergedMangaReference) {
@@ -138,7 +189,12 @@ class MergedMangaRepository {
         )
     }
 
-    fun updateReferenceChapterCount(mergedId: Long, sourceId: Long, mangaUrl: String, count: Int) {
+    fun updateReferenceChapterCount(
+        mergedId: Long,
+        sourceId: Long,
+        mangaUrl: String,
+        count: Int,
+    ) {
         val db = dbHelper.writableDatabase
         val values = ContentValues().apply {
             put("chapter_count", count)
