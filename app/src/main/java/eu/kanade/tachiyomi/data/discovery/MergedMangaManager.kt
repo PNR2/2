@@ -16,6 +16,9 @@ class MergedMangaManager {
 
     private val repository = MergedMangaRepository()
 
+    /**
+     * Creates or updates a cohesive manga entry and links matching sources from extensions.
+     */
     suspend fun createOrUpdateMergedManga(
         title: String,
         coverUrl: String? = null,
@@ -23,7 +26,8 @@ class MergedMangaManager {
         author: String? = null,
         malId: Long? = null,
     ): Long = withContext(Dispatchers.IO) {
-        val mergedId = repository.createMergedManga(
+        // Create or update the main entry (prevents duplicates)
+        val mergedId = repository.createOrUpdateMergedManga(
             MergedManga(
                 title = title,
                 coverUrl = coverUrl,
@@ -42,10 +46,14 @@ class MergedMangaManager {
 
         val sources = sourceManager.getOnlineSources()
             .filterIsInstance<CatalogueSource>()
+            .sortedByDescending { it.lang.equals("en", ignoreCase = true) }
             .take(40)
 
-        if (sources.isEmpty()) return@withContext mergedId
+        if (sources.isEmpty()) {
+            return@withContext mergedId
+        }
 
+        // Search all sources
         val searchResults = coroutineScope {
             sources.map { source ->
                 async {
@@ -54,7 +62,7 @@ class MergedMangaManager {
             }.awaitAll()
         }
 
-        // Accept almost everything for now
+        // Accept results and link them
         val accepted = searchResults.flatten()
             .distinctBy { "${it.sourceId}_${it.url}" }
             .take(25)
