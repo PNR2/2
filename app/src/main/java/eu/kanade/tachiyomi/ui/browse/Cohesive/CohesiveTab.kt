@@ -13,11 +13,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,7 +34,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.navigator.LocalNavigator
@@ -47,12 +55,9 @@ import tachiyomi.i18n.MR
 fun cohesiveTab(): TabContent {
     return TabContent(
         titleRes = MR.strings.browse,
-        searchEnabled = true,
-        content = { contentPadding, searchQuery ->
-            CohesiveSearchContent(
-                contentPadding = contentPadding,
-                searchQuery = searchQuery,
-            )
+        searchEnabled = false, // we use our own search field
+        content = { contentPadding, _ ->
+            CohesiveSearchContent(contentPadding = contentPadding)
         },
     )
 }
@@ -60,54 +65,46 @@ fun cohesiveTab(): TabContent {
 @Composable
 private fun CohesiveSearchContent(
     contentPadding: PaddingValues,
-    searchQuery: String?,
 ) {
     val navigator = LocalNavigator.currentOrThrow
     val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
     val manager = remember { MergedMangaManager() }
     val repository = remember { MergedMangaRepository() }
 
+    var query by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
     var progressText by remember { mutableStateOf("") }
     var result by remember { mutableStateOf<MergedManga?>(null) }
     var errorText by remember { mutableStateOf<String?>(null) }
 
-    // Start search when query is not empty
-    androidx.compose.runtime.LaunchedEffect(searchQuery) {
-        if (searchQuery.isNullOrBlank()) {
-            result = null
-            errorText = null
-            progressText = ""
-            return@LaunchedEffect
-        }
+    fun startSearch() {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty() || isSearching) return
 
+        focusManager.clearFocus()
         isSearching = true
         progressText = "Searching all extensions..."
         errorText = null
         result = null
 
-        try {
-            val mergedId = withContext(Dispatchers.IO) {
-                manager.createOrUpdateMergedManga(
-                    title = searchQuery.trim(),
-                )
-            }
+        scope.launch {
+            try {
+                val mergedId = withContext(Dispatchers.IO) {
+                    manager.createOrUpdateMergedManga(title = trimmed)
+                }
 
-            // Get the entry we just created/updated
-            val all = repository.subscribeToMergedManga().value
-            val found = all.find { it.id == mergedId }
+                val all = repository.subscribeToMergedManga().value
+                val found = all.find { it.id == mergedId }
 
-            result = found
-            progressText = if (found != null) {
-                "Done"
-            } else {
-                "Entry created"
+                result = found
+                progressText = if (found != null) "Done" else "Entry created"
+            } catch (e: Exception) {
+                errorText = e.message ?: "Search failed"
+                progressText = ""
+            } finally {
+                isSearching = false
             }
-        } catch (e: Exception) {
-            errorText = e.message ?: "Search failed"
-            progressText = ""
-        } finally {
-            isSearching = false
         }
     }
 
@@ -116,33 +113,35 @@ private fun CohesiveSearchContent(
             .fillMaxSize()
             .padding(contentPadding),
     ) {
+        // Search field
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            placeholder = { Text("Search cohesive manga...") },
+            leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { startSearch() }),
+        )
+
         if (isSearching) {
             LinearProgressIndicator(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp),
             )
             Text(
                 text = progressText,
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
         }
 
         when {
-            searchQuery.isNullOrBlank() -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "Search for a manga to create a Cohesive entry",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
             errorText != null -> {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -205,19 +204,36 @@ private fun CohesiveSearchContent(
                 }
             }
 
+            query.isBlank() -> {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "Type a manga name and press search",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            isSearching -> {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+
             else -> {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (isSearching) {
-                        CircularProgressIndicator()
-                    } else {
-                        Text(
-                            text = "No result",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    Text(
+                        text = "No result yet",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
