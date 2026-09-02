@@ -16,6 +16,7 @@ import dev.zacsweers.metrox.viewmodel.metroViewModel
 import eu.kanade.presentation.components.TabbedScreen
 import eu.kanade.presentation.util.Tab
 import eu.kanade.tachiyomi.R
+import eu.kanade.tachiyomi.ui.browse.cohesive.cohesiveTab
 import eu.kanade.tachiyomi.ui.browse.extension.ExtensionsViewModel
 import eu.kanade.tachiyomi.ui.browse.extension.extensionsTab
 import eu.kanade.tachiyomi.ui.browse.migration.sources.migrateSourceTab
@@ -65,6 +66,7 @@ data object BrowseTab : Tab {
             sourcesTab(),
             extensionsTab(extensionsViewModel),
             migrateSourceTab(),
+            cohesiveTab(),
         )
 
         val state = rememberPagerState { tabs.size }
