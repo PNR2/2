@@ -1,7 +1,10 @@
+@file:Suppress("ktlint:standard:max-line-length")
+
 package eu.kanade.tachiyomi.data.discovery
 
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -17,7 +20,7 @@ class MergedMangaManager {
     private val repository = MergedMangaRepository()
 
     /**
-     * Creates or updates a cohesive manga entry and links matching sources from extensions.
+     * Creates or updates a cohesive manga entry and tries hard to link matching sources.
      */
     suspend fun createOrUpdateMergedManga(
         title: String,
@@ -26,7 +29,7 @@ class MergedMangaManager {
         author: String? = null,
         malId: Long? = null,
     ): Long = withContext(Dispatchers.IO) {
-        // Create or update the main entry (prevents duplicates)
+        // 1. Create or update the main entry (prevents duplicates)
         val mergedId = repository.createOrUpdateMergedManga(
             MergedManga(
                 title = title,
@@ -38,34 +41,42 @@ class MergedMangaManager {
             ),
         )
 
-        val sourceManager: SourceManager = try {
-            Injekt.get()
+        // 2. Get SourceManager safely
+        val sourceManager = try {
+            Injekt.get<SourceManager>()
         } catch (_: Exception) {
             return@withContext mergedId
         }
 
-        val sources = sourceManager.getOnlineSources()
-            .filterIsInstance<CatalogueSource>()
-            .sortedByDescending { it.lang.equals("en", ignoreCase = true) }
-            .take(40)
+        // 3. Get all catalogue sources (prefer English)
+        val allSources = try {
+            sourceManager.getAll()
+                .filterIsInstance<CatalogueSource>()
+                .sortedByDescending { it.lang.equals("en", ignoreCase = true) }
+                .take(50)
+        } catch (_: Exception) {
+            emptyList()
+        }
 
-        if (sources.isEmpty()) {
+        if (allSources.isEmpty()) {
             return@withContext mergedId
         }
 
-        // Search all sources
+        // 4. Search many sources in parallel
         val searchResults = coroutineScope {
-            sources.map { source ->
+            allSources.map { source ->
                 async {
                     searchInSource(source, title)
                 }
             }.awaitAll()
         }
 
-        // Accept results and link them
-        val accepted = searchResults.flatten()
-            .distinctBy { "${it.sourceId}_${it.url}" }
-            .take(25)
+        // 5. Accept good matches and save them
+        val accepted = searchResults
+            .flatten()
+            .distinctBy { "\( {it.sourceId}_ \){it.url}" }
+            .sortedByDescending { it.score }
+            .take(20)
 
         accepted.forEach { match ->
             repository.addReference(
@@ -75,8 +86,8 @@ class MergedMangaManager {
                     mangaUrl = match.url,
                     mangaTitle = match.title,
                     chapterCount = 0,
-                    isInfoSource = false,
-                    priority = if (match.lang.equals("en", ignoreCase = true)) 10 else 3,
+                    isInfoSource = match.score >= 80,
+                    priority = match.score,
                 ),
             )
         }
@@ -86,18 +97,24 @@ class MergedMangaManager {
 
     private suspend fun searchInSource(
         source: CatalogueSource,
-        title: String,
+        query: String,
     ): List<SearchMatch> {
         return try {
-            withTimeoutOrNull(5000) {
-                val result = source.getSearchManga(1, title, FilterList())
-                result.mangas.take(6).map { manga ->
-                    SearchMatch(
-                        sourceId = source.id,
-                        url = manga.url,
-                        title = manga.title,
-                        lang = source.lang,
-                    )
+            withTimeoutOrNull(6000) {
+                val page = source.getSearchManga(1, query, FilterList())
+                page.mangas.take(8).mapNotNull { manga ->
+                    val score = calculateScore(manga, query)
+                    if (score >= 35) {
+                        SearchMatch(
+                            sourceId = source.id,
+                            url = manga.url,
+                            title = manga.title,
+                            lang = source.lang,
+                            score = score,
+                        )
+                    } else {
+                        null
+                    }
                 }
             } ?: emptyList()
         } catch (_: Exception) {
@@ -105,10 +122,41 @@ class MergedMangaManager {
         }
     }
 
+    /**
+     * Simple but effective ranking.
+     * Higher score = better match.
+     */
+    private fun calculateScore(manga: SManga, query: String): Int {
+        val mangaTitle = manga.title.trim().lowercase()
+        val q = query.trim().lowercase()
+
+        var score = 0
+
+        when {
+            mangaTitle == q -> score += 100
+            mangaTitle.startsWith(q) || q.startsWith(mangaTitle) -> score += 80
+            mangaTitle.contains(q) || q.contains(mangaTitle) -> score += 60
+            else -> {
+                val qWords = q.split(Regex("\\s+")).filter { it.length > 2 }.toSet()
+                val mWords = mangaTitle.split(Regex("\\s+")).filter { it.length > 2 }.toSet()
+                val common = qWords.intersect(mWords).size
+                score += common * 15
+            }
+        }
+
+        // Small bonuses
+        if (!manga.description.isNullOrBlank()) score += 5
+        if (!manga.author.isNullOrBlank()) score += 3
+        if (mangaTitle.length < 3) score -= 30
+
+        return score.coerceIn(0, 120)
+    }
+
     private data class SearchMatch(
         val sourceId: Long,
         val url: String,
         val title: String,
         val lang: String,
+        val score: Int,
     )
 }
