@@ -1,3 +1,5 @@
+@file:Suppress("ktlint:standard:max-line-length")
+
 package eu.kanade.tachiyomi.ui.browse.cohesive
 
 import androidx.compose.foundation.clickable
@@ -12,7 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -46,6 +47,7 @@ import eu.kanade.presentation.components.TabContent
 import eu.kanade.tachiyomi.data.discovery.MergedManga
 import eu.kanade.tachiyomi.data.discovery.MergedMangaManager
 import eu.kanade.tachiyomi.data.discovery.MergedMangaRepository
+import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import eu.kanade.tachiyomi.ui.discovery.MergedMangaScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -55,7 +57,7 @@ import tachiyomi.i18n.MR
 fun cohesiveTab(): TabContent {
     return TabContent(
         titleRes = MR.strings.browse,
-        searchEnabled = false, // we use our own search field
+        searchEnabled = false,
         content = { contentPadding, _ ->
             CohesiveSearchContent(contentPadding = contentPadding)
         },
@@ -84,7 +86,7 @@ private fun CohesiveSearchContent(
 
         focusManager.clearFocus()
         isSearching = true
-        progressText = "Searching all extensions..."
+        progressText = "Creating cohesive entry..."
         errorText = null
         result = null
 
@@ -98,7 +100,10 @@ private fun CohesiveSearchContent(
                 val found = all.find { it.id == mergedId }
 
                 result = found
-                progressText = if (found != null) "Done" else "Entry created"
+                progressText = "Opening Global Search..."
+
+                // Open the real Global Search so the user sees actual extension results
+                navigator.push(GlobalSearchScreen(searchQuery = trimmed))
             } catch (e: Exception) {
                 errorText = e.message ?: "Search failed"
                 progressText = ""
@@ -113,7 +118,6 @@ private fun CohesiveSearchContent(
             .fillMaxSize()
             .padding(contentPadding),
     ) {
-        // Search field
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -222,18 +226,6 @@ private fun CohesiveSearchContent(
                     contentAlignment = Alignment.Center,
                 ) {
                     CircularProgressIndicator()
-                }
-            }
-
-            else -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "No result yet",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
         }
