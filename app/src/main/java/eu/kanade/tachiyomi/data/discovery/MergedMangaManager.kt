@@ -5,6 +5,7 @@ package eu.kanade.tachiyomi.data.discovery
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -20,7 +21,7 @@ class MergedMangaManager {
     private val repository = MergedMangaRepository()
 
     /**
-     * Creates or updates a cohesive manga entry and tries hard to link matching sources.
+     * Creates or updates a cohesive manga entry and links matching sources.
      */
     suspend fun createOrUpdateMergedManga(
         title: String,
@@ -29,7 +30,7 @@ class MergedMangaManager {
         author: String? = null,
         malId: Long? = null,
     ): Long = withContext(Dispatchers.IO) {
-        // 1. Create or update the main entry (prevents duplicates)
+        // 1. Create or update the main entry
         val mergedId = repository.createOrUpdateMergedManga(
             MergedManga(
                 title = title,
@@ -41,37 +42,37 @@ class MergedMangaManager {
             ),
         )
 
-        // 2. Get SourceManager safely
+        // 2. Get SourceManager
         val sourceManager = try {
             Injekt.get<SourceManager>()
         } catch (_: Exception) {
             return@withContext mergedId
         }
 
-        // 3. Get all catalogue sources (prefer English)
-        val allSources = try {
-            sourceManager.getAll()
+        // 3. Get searchable sources (prefer English)
+        val sources = try {
+            sourceManager.getOnlineSources()
                 .filterIsInstance<CatalogueSource>()
                 .sortedByDescending { it.lang.equals("en", ignoreCase = true) }
-                .take(50)
+                .take(40)
         } catch (_: Exception) {
             emptyList()
         }
 
-        if (allSources.isEmpty()) {
+        if (sources.isEmpty()) {
             return@withContext mergedId
         }
 
-        // 4. Search many sources in parallel
+        // 4. Search in parallel
         val searchResults = coroutineScope {
-            allSources.map { source ->
+            sources.map { source ->
                 async {
                     searchInSource(source, title)
                 }
             }.awaitAll()
         }
 
-        // 5. Accept good matches and save them
+        // 5. Keep good matches
         val accepted = searchResults
             .flatten()
             .distinctBy { match ->
@@ -80,6 +81,7 @@ class MergedMangaManager {
             .sortedByDescending { it.score }
             .take(20)
 
+        // 6. Save references
         accepted.forEach { match ->
             repository.addReference(
                 MergedMangaReference(
@@ -102,11 +104,11 @@ class MergedMangaManager {
         query: String,
     ): List<SearchMatch> {
         return try {
-            withTimeoutOrNull(6000) {
+            withTimeoutOrNull(7000) {
                 val page = source.getSearchManga(1, query, FilterList())
-                page.mangas.take(8).mapNotNull { manga ->
+                page.mangas.take(6).mapNotNull { manga ->
                     val score = calculateScore(manga, query)
-                    if (score >= 35) {
+                    if (score >= 30) {
                         SearchMatch(
                             sourceId = source.id,
                             url = manga.url,
@@ -124,10 +126,6 @@ class MergedMangaManager {
         }
     }
 
-    /**
-     * Simple but effective ranking.
-     * Higher score = better match.
-     */
     private fun calculateScore(manga: SManga, query: String): Int {
         val mangaTitle = manga.title.trim().lowercase()
         val q = query.trim().lowercase()
@@ -137,19 +135,18 @@ class MergedMangaManager {
         when {
             mangaTitle == q -> score += 100
             mangaTitle.startsWith(q) || q.startsWith(mangaTitle) -> score += 80
-            mangaTitle.contains(q) || q.contains(mangaTitle) -> score += 60
+            mangaTitle.contains(q) || q.contains(mangaTitle) -> score += 55
             else -> {
                 val qWords = q.split(" ").filter { it.length > 2 }.toSet()
                 val mWords = mangaTitle.split(" ").filter { it.length > 2 }.toSet()
                 val common = qWords.intersect(mWords).size
-                score += common * 15
+                score += common * 12
             }
         }
 
-        // Small bonuses
         if (!manga.description.isNullOrBlank()) score += 5
         if (!manga.author.isNullOrBlank()) score += 3
-        if (mangaTitle.length < 3) score -= 30
+        if (mangaTitle.length < 3) score -= 25
 
         return score.coerceIn(0, 120)
     }
