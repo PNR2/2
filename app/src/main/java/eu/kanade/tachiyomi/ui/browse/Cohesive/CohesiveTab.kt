@@ -27,10 +27,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,15 +43,9 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
+import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import eu.kanade.presentation.components.TabContent
-import eu.kanade.tachiyomi.data.discovery.MergedManga
-import eu.kanade.tachiyomi.data.discovery.MergedMangaManager
-import eu.kanade.tachiyomi.data.discovery.MergedMangaRepository
-import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import eu.kanade.tachiyomi.ui.discovery.MergedMangaScreen
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import tachiyomi.i18n.MR
 
 fun cohesiveTab(): TabContent {
@@ -69,48 +63,28 @@ private fun CohesiveSearchContent(
     contentPadding: PaddingValues,
 ) {
     val navigator = LocalNavigator.currentOrThrow
-    val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
-    val manager = remember { MergedMangaManager() }
-    val repository = remember { MergedMangaRepository() }
 
     var query by remember { mutableStateOf("") }
-    var isSearching by remember { mutableStateOf(false) }
-    var progressText by remember { mutableStateOf("") }
-    var result by remember { mutableStateOf<MergedManga?>(null) }
-    var errorText by remember { mutableStateOf<String?>(null) }
+
+    // Create ViewModel only when we have a query to search
+    val viewModel = if (query.isNotBlank()) {
+        assistedMetroViewModel<CohesiveSearchViewModel, CohesiveSearchViewModel.Factory> {
+            create(initialQuery = query.trim())
+        }
+    } else {
+        null
+    }
+
+    val state by (viewModel?.state?.collectAsState() ?: remember {
+        mutableStateOf(CohesiveSearchViewModel.State())
+    })
 
     fun startSearch() {
         val trimmed = query.trim()
-        if (trimmed.isEmpty() || isSearching) return
-
+        if (trimmed.isEmpty()) return
         focusManager.clearFocus()
-        isSearching = true
-        progressText = "Creating cohesive entry..."
-        errorText = null
-        result = null
-
-        scope.launch {
-            try {
-                val mergedId = withContext(Dispatchers.IO) {
-                    manager.createOrUpdateMergedManga(title = trimmed)
-                }
-
-                val all = repository.subscribeToMergedManga().value
-                val found = all.find { it.id == mergedId }
-
-                result = found
-                progressText = "Opening Global Search..."
-
-                // Open the real Global Search so the user sees actual extension results
-                navigator.push(GlobalSearchScreen(searchQuery = trimmed))
-            } catch (e: Exception) {
-                errorText = e.message ?: "Search failed"
-                progressText = ""
-            } finally {
-                isSearching = false
-            }
-        }
+        // The ViewModel is recreated with the new query because of the key above
     }
 
     Column(
@@ -118,6 +92,7 @@ private fun CohesiveSearchContent(
             .fillMaxSize()
             .padding(contentPadding),
     ) {
+        // Search field
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -128,17 +103,21 @@ private fun CohesiveSearchContent(
             leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { startSearch() }),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    focusManager.clearFocus()
+                },
+            ),
         )
 
-        if (isSearching) {
+        if (state.isSearching) {
             LinearProgressIndicator(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
             )
             Text(
-                text = progressText,
+                text = state.progressText,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
@@ -146,20 +125,20 @@ private fun CohesiveSearchContent(
         }
 
         when {
-            errorText != null -> {
+            state.error != null -> {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = errorText ?: "Error",
+                        text = state.error ?: "Error",
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
             }
 
-            result != null -> {
-                val manga = result!!
+            state.result != null -> {
+                val manga = state.result!!
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
                     contentPadding = PaddingValues(16.dp),
@@ -197,7 +176,11 @@ private fun CohesiveSearchContent(
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "Cohesive Entry",
+                                        text = if (state.linkedCount > 0) {
+                                            "Linked ${state.linkedCount} sources"
+                                        } else {
+                                            "Cohesive Entry"
+                                        },
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.primary,
                                     )
@@ -214,13 +197,13 @@ private fun CohesiveSearchContent(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = "Type a manga name and press search",
+                        text = "Type a manga name and press search on the keyboard",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
 
-            isSearching -> {
+            state.isSearching -> {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
@@ -228,6 +211,18 @@ private fun CohesiveSearchContent(
                     CircularProgressIndicator()
                 }
             }
+
+            else -> {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "Press search on the keyboard to start",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
-}
+}q
