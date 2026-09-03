@@ -74,7 +74,9 @@ class MergedMangaManager {
         // 5. Accept good matches and save them
         val accepted = searchResults
             .flatten()
-            .distinctBy { "\( {it.sourceId}_ \){it.url}" }
+            .distinctBy { match ->
+                match.sourceId.toString() + "_" + match.url
+            }
             .sortedByDescending { it.score }
             .take(20)
 
@@ -137,8 +139,8 @@ class MergedMangaManager {
             mangaTitle.startsWith(q) || q.startsWith(mangaTitle) -> score += 80
             mangaTitle.contains(q) || q.contains(mangaTitle) -> score += 60
             else -> {
-                val qWords = q.split(Regex("\\s+")).filter { it.length > 2 }.toSet()
-                val mWords = mangaTitle.split(Regex("\\s+")).filter { it.length > 2 }.toSet()
+                val qWords = q.split(" ").filter { it.length > 2 }.toSet()
+                val mWords = mangaTitle.split(" ").filter { it.length > 2 }.toSet()
                 val common = qWords.intersect(mWords).size
                 score += common * 15
             }
