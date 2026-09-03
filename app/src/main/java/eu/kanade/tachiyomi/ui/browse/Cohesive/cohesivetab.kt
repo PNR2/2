@@ -67,7 +67,6 @@ private fun CohesiveSearchContent(
 
     var query by remember { mutableStateOf("") }
 
-    // Create ViewModel only when we have a query to search
     val viewModel = if (query.isNotBlank()) {
         assistedMetroViewModel<CohesiveSearchViewModel, CohesiveSearchViewModel.Factory> {
             create(initialQuery = query.trim())
@@ -76,23 +75,14 @@ private fun CohesiveSearchContent(
         null
     }
 
-    val state by (viewModel?.state?.collectAsState() ?: remember {
-        mutableStateOf(CohesiveSearchViewModel.State())
-    })
-
-    fun startSearch() {
-        val trimmed = query.trim()
-        if (trimmed.isEmpty()) return
-        focusManager.clearFocus()
-        // The ViewModel is recreated with the new query because of the key above
-    }
+    val state by (viewModel?.state?.collectAsState()
+        ?: remember { mutableStateOf(CohesiveSearchViewModel.State()) })
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(contentPadding),
     ) {
-        // Search field
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -104,9 +94,7 @@ private fun CohesiveSearchContent(
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(
-                onSearch = {
-                    focusManager.clearFocus()
-                },
+                onSearch = { focusManager.clearFocus() },
             ),
         )
 
@@ -225,4 +213,4 @@ private fun CohesiveSearchContent(
             }
         }
     }
-}q
+}
