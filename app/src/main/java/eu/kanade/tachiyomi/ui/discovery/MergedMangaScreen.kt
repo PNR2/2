@@ -1,4 +1,4 @@
-@file:Suppress("ktlint:standard:max-line-length", "DEPRECATION")
+@file:Suppress("ktlint:standard:max-line-length")
 
 package eu.kanade.tachiyomi.ui.discovery
 
@@ -48,7 +48,6 @@ import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
-import eu.kanade.tachiyomi.util.lang.awaitSingle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -313,9 +312,14 @@ data class MergedMangaScreen(
                         title = ref.mangaTitle ?: ""
                     }
 
-                    val chapterList: List<SChapter> = withTimeoutOrNull(15000) {
-                        // Rx API used by many Mihon / Tachiyomi forks
-                        source.fetchChapterList(sManga).awaitSingle()
+                    val chapterList: List<SChapter> = withTimeoutOrNull(20000) {
+                        val update = source.getMangaUpdate(
+                            manga = sManga,
+                            chapters = emptyList(),
+                            fetchDetails = false,
+                            fetchChapters = true,
+                        )
+                        update.chapters
                     } ?: return@async emptyList<MergedChapter>()
 
                     chapterList.map { ch: SChapter ->
