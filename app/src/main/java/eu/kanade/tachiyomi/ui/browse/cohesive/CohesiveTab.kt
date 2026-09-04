@@ -65,20 +65,20 @@ private fun CohesiveSearchContent(
     val navigator = LocalNavigator.currentOrThrow
     val focusManager = LocalFocusManager.current
 
+    // ViewModel is created once with empty query
+    val viewModel = assistedMetroViewModel<CohesiveSearchViewModel, CohesiveSearchViewModel.Factory> {
+        create(initialQuery = "")
+    }
+    val state by viewModel.state.collectAsState()
+
     var query by remember { mutableStateOf("") }
 
-    val viewModel = if (query.isNotBlank()) {
-        assistedMetroViewModel<CohesiveSearchViewModel, CohesiveSearchViewModel.Factory> {
-            create(initialQuery = query.trim())
-        }
-    } else {
-        null
+    fun startSearch() {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty() || state.isSearching) return
+        focusManager.clearFocus()
+        viewModel.search(trimmed)
     }
-
-    val state by (
-        viewModel?.state?.collectAsState()
-            ?: remember { mutableStateOf(CohesiveSearchViewModel.State()) }
-        )
 
     Column(
         modifier = Modifier
@@ -96,7 +96,7 @@ private fun CohesiveSearchContent(
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(
-                onSearch = { focusManager.clearFocus() },
+                onSearch = { startSearch() },
             ),
         )
 
@@ -181,13 +181,13 @@ private fun CohesiveSearchContent(
                 }
             }
 
-            query.isBlank() -> {
+            query.isBlank() && !state.isSearching -> {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = "Type a manga name and press search on the keyboard",
+                        text = "Type the full manga name, then press Search on the keyboard",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -199,18 +199,6 @@ private fun CohesiveSearchContent(
                     contentAlignment = Alignment.Center,
                 ) {
                     CircularProgressIndicator()
-                }
-            }
-
-            else -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "Press search on the keyboard to start",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
         }
