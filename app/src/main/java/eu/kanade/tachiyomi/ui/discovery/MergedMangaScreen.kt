@@ -44,9 +44,9 @@ import eu.kanade.tachiyomi.data.discovery.MergedManga
 import eu.kanade.tachiyomi.data.discovery.MergedMangaManager
 import eu.kanade.tachiyomi.data.discovery.MergedMangaReference
 import eu.kanade.tachiyomi.data.discovery.MergedMangaRepository
+import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -304,7 +304,7 @@ data class MergedMangaScreen(
         val deferredList = references.map { ref ->
             async {
                 try {
-                    val source = sourceManager.get(ref.sourceId) as? HttpSource
+                    val source: Source = sourceManager.get(ref.sourceId)
                         ?: return@async emptyList<MergedChapter>()
 
                     val sManga = SManga.create().apply {
