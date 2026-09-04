@@ -47,9 +47,6 @@ import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import tachiyomi.domain.source.service.SourceManager
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 
 data class MergedMangaScreen(
     private val mergedManga: MergedManga,
@@ -62,14 +59,6 @@ data class MergedMangaScreen(
         val repository = remember { MergedMangaRepository() }
         val manager = remember { MergedMangaManager() }
         val scope = rememberCoroutineScope()
-
-        val sourceManager = remember {
-            try {
-                Injekt.get<SourceManager>()
-            } catch (_: Exception) {
-                null
-            }
-        }
 
         var references by remember {
             mutableStateOf(repository.getReferences(mergedManga.id))
@@ -185,17 +174,11 @@ data class MergedMangaScreen(
                     }
                 } else {
                     items(references) { ref ->
-                        val sourceName = remember(ref.sourceId) {
-                            sourceManager?.get(ref.sourceId)?.toString()
-                                ?: "Source ${ref.sourceId}"
-                        }
-
                         SourceCard(
                             title = ref.mangaTitle ?: "Unknown title",
-                            sourceName = sourceName,
+                            sourceName = ref.sourceName ?: "Source ${ref.sourceId}",
                             priority = ref.priority,
                             onClick = {
-                                // Open Global Search with the exact title of this match
                                 navigator.push(
                                     GlobalSearchScreen(
                                         searchQuery = ref.mangaTitle ?: mergedManga.title,
