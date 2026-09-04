@@ -1,3 +1,5 @@
+@file:Suppress("ktlint:standard:max-line-length")
+
 package eu.kanade.tachiyomi.data.discovery
 
 import android.app.Application
@@ -74,6 +76,7 @@ class DiscoveryDatabaseHelper(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 merged_id INTEGER NOT NULL,
                 source_id INTEGER NOT NULL,
+                source_name TEXT,
                 manga_url TEXT NOT NULL,
                 manga_title TEXT,
                 chapter_count INTEGER DEFAULT 0,
@@ -84,7 +87,7 @@ class DiscoveryDatabaseHelper(
             """.trimIndent(),
         )
 
-        // Chapters belonging to a merged manga
+        // Merged chapters (for future use)
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS merged_chapter (
@@ -121,6 +124,7 @@ class DiscoveryDatabaseHelper(
             } catch (_: Exception) {
             }
         }
+
         if (oldVersion < 4) {
             db.execSQL(
                 """
@@ -156,7 +160,15 @@ class DiscoveryDatabaseHelper(
                 """.trimIndent(),
             )
         }
+
         if (oldVersion < 5) {
+            // Add source_name column to existing table
+            try {
+                db.execSQL("ALTER TABLE merged_manga_reference ADD COLUMN source_name TEXT")
+            } catch (_: Exception) {
+            }
+
+            // Create merged_chapter table if missing
             db.execSQL(
                 """
                 CREATE TABLE IF NOT EXISTS merged_chapter (
