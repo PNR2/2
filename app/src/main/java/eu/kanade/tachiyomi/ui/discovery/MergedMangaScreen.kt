@@ -39,14 +39,23 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
+import eu.kanade.tachiyomi.data.discovery.MergedChapter
 import eu.kanade.tachiyomi.data.discovery.MergedManga
 import eu.kanade.tachiyomi.data.discovery.MergedMangaManager
 import eu.kanade.tachiyomi.data.discovery.MergedMangaReference
 import eu.kanade.tachiyomi.data.discovery.MergedMangaRepository
+import eu.kanade.tachiyomi.source.CatalogueSource
+import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import tachiyomi.domain.source.service.SourceManager
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 data class MergedMangaScreen(
     private val mergedManga: MergedManga,
@@ -60,10 +69,22 @@ data class MergedMangaScreen(
         val manager = remember { MergedMangaManager() }
         val scope = rememberCoroutineScope()
 
+        val sourceManager = remember {
+            try {
+                Injekt.get<SourceManager>()
+            } catch (_: Exception) {
+                null
+            }
+        }
+
         var references by remember {
             mutableStateOf(repository.getReferences(mergedManga.id))
         }
+        var chapters by remember {
+            mutableStateOf(repository.getChapters(mergedManga.id))
+        }
         var isRelinking by remember { mutableStateOf(false) }
+        var isFetchingChapters by remember { mutableStateOf(false) }
         var statusText by remember { mutableStateOf("") }
 
         Scaffold(
@@ -83,7 +104,7 @@ data class MergedMangaScreen(
                     .fillMaxSize()
                     .padding(paddingValues),
                 contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item {
                     if (!mergedManga.coverUrl.isNullOrEmpty()) {
@@ -92,7 +113,7 @@ data class MergedMangaScreen(
                             contentDescription = "Cover",
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(260.dp),
+                                .height(240.dp),
                             contentScale = ContentScale.Crop,
                         )
                         Spacer(modifier = Modifier.height(12.dp))
@@ -105,7 +126,7 @@ data class MergedMangaScreen(
                     )
 
                     if (!mergedManga.synopsis.isNullOrEmpty()) {
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = mergedManga.synopsis,
                             style = MaterialTheme.typography.bodyMedium,
@@ -113,8 +134,9 @@ data class MergedMangaScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
+                    // Re-link button
                     Button(
                         onClick = {
                             if (isRelinking) return@Button
@@ -132,7 +154,7 @@ data class MergedMangaScreen(
                                         )
                                     }
                                     references = repository.getReferences(mergedManga.id)
-                                    statusText = "Done. Sources found: ${references.size}"
+                                    statusText = "Done. Sources: ${references.size}"
                                 } catch (e: Exception) {
                                     statusText = "Error: ${e.message}"
                                 } finally {
@@ -140,10 +162,59 @@ data class MergedMangaScreen(
                                 }
                             }
                         },
-                        enabled = !isRelinking,
+                        enabled = !isRelinking && !isFetchingChapters,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (isRelinking) "Linking..." else "Re-link now")
+                        Text(if (isRelinking) "Linking..." else "Re-link sources")
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Fetch chapters button
+                    Button(
+                        onClick = {
+                            if (isFetchingChapters || references.isEmpty() || sourceManager == null) return@Button
+                            isFetchingChapters = true
+                            statusText = "Fetching chapters from ${references.size} sources..."
+                            scope.launch {
+                                try {
+                                    val allChapters = withContext(Dispatchers.IO) {
+                                        fetchChaptersFromSources(
+                                            sourceManager = sourceManager,
+                                            references = references,
+                                            mergedId = mergedManga.id,
+                                        )
+                                    }
+                                    repository.addChapters(allChapters)
+                                    // Update chapter counts on references
+                                    allChapters.groupBy { it.sourceId to it.url }.forEach { (key, list) ->
+                                        // key is not exact; we update by source from refs
+                                    }
+                                    references.forEach { ref ->
+                                        val count = allChapters.count { it.sourceId == ref.sourceId }
+                                        if (count > 0) {
+                                            repository.updateReferenceChapterCount(
+                                                mergedId = mergedManga.id,
+                                                sourceId = ref.sourceId,
+                                                mangaUrl = ref.mangaUrl,
+                                                count = count,
+                                            )
+                                        }
+                                    }
+                                    chapters = repository.getChapters(mergedManga.id)
+                                    references = repository.getReferences(mergedManga.id)
+                                    statusText = "Fetched ${chapters.size} chapters"
+                                } catch (e: Exception) {
+                                    statusText = "Error: ${e.message}"
+                                } finally {
+                                    isFetchingChapters = false
+                                }
+                            }
+                        },
+                        enabled = !isFetchingChapters && !isRelinking && references.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (isFetchingChapters) "Fetching chapters..." else "Fetch chapters")
                     }
 
                     if (statusText.isNotEmpty()) {
@@ -156,6 +227,7 @@ data class MergedMangaScreen(
                     }
                 }
 
+                // Linked sources
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
@@ -168,34 +240,108 @@ data class MergedMangaScreen(
                 if (references.isEmpty()) {
                     item {
                         Text(
-                            text = "No sources linked yet. Tap \"Re-link now\".",
+                            text = "No sources linked yet.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 } else {
                     items(references) { ref ->
                         SourceCard(
-                            title = ref.mangaTitle ?: "Unknown title",
+                            title = ref.mangaTitle ?: "Unknown",
                             sourceName = ref.sourceName ?: "Source ${ref.sourceId}",
+                            chapterCount = ref.chapterCount,
                             priority = ref.priority,
                             onClick = {
                                 navigator.push(
-                                    GlobalSearchScreen(
-                                        searchQuery = ref.mangaTitle ?: mergedManga.title,
-                                    ),
+                                    GlobalSearchScreen(searchQuery = ref.mangaTitle ?: mergedManga.title),
                                 )
                             },
                         )
+                    }
+                }
+
+                // Chapters
+                item {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Chapters (${chapters.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+
+                if (chapters.isEmpty()) {
+                    item {
+                        Text(
+                            text = "No chapters yet. Tap \"Fetch chapters\".",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    items(chapters.take(100)) { chapter ->
+                        ChapterCard(chapter = chapter)
+                    }
+                    if (chapters.size > 100) {
+                        item {
+                            Text(
+                                text = "... and ${chapters.size - 100} more",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
         }
     }
 
+    private suspend fun fetchChaptersFromSources(
+        sourceManager: SourceManager,
+        references: List<MergedMangaReference>,
+        mergedId: Long,
+    ): List<MergedChapter> {
+        val results = references.map { ref ->
+            async {
+                try {
+                    val source = sourceManager.get(ref.sourceId) as? CatalogueSource
+                        ?: return@async emptyList()
+
+                    val sManga = SManga.create().apply {
+                        url = ref.mangaUrl
+                        title = ref.mangaTitle ?: ""
+                    }
+
+                    val chapterList = withTimeoutOrNull(15000) {
+                        source.getChapterList(sManga)
+                    } ?: return@async emptyList()
+
+                    chapterList.map { ch ->
+                        MergedChapter(
+                            mergedId = mergedId,
+                            sourceId = ref.sourceId,
+                            url = ch.url,
+                            name = ch.name,
+                            chapterNumber = ch.chapter_number,
+                            language = source.lang,
+                            dateUpload = ch.date_upload,
+                        )
+                    }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+        }.awaitAll()
+
+        return results.flatten()
+            .distinctBy { it.sourceId.toString() + "_" + it.url }
+            .sortedBy { it.chapterNumber }
+    }
+
     @Composable
     private fun SourceCard(
         title: String,
         sourceName: String,
+        chapterCount: Int,
         priority: Int,
         onClick: () -> Unit,
     ) {
@@ -219,7 +365,40 @@ data class MergedMangaScreen(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "Match score: $priority",
+                    text = if (chapterCount > 0) {
+                        "$chapterCount chapters • score $priority"
+                    } else {
+                        "Match score: $priority"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+
+    @Composable
+    private fun ChapterCard(chapter: MergedChapter) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = chapter.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = buildString {
+                        if (chapter.chapterNumber >= 0) {
+                            append("Ch. ${chapter.chapterNumber}")
+                        }
+                        if (!chapter.language.isNullOrBlank()) {
+                            if (isNotEmpty()) append(" • ")
+                            append(chapter.language)
+                        }
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
