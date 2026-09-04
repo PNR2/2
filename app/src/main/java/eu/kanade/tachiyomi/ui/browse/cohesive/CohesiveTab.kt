@@ -75,8 +75,10 @@ private fun CohesiveSearchContent(
         null
     }
 
-    val state by (viewModel?.state?.collectAsState()
-        ?: remember { mutableStateOf(CohesiveSearchViewModel.State()) })
+    val state by (
+        viewModel?.state?.collectAsState()
+            ?: remember { mutableStateOf(CohesiveSearchViewModel.State()) }
+        )
 
     Column(
         modifier = Modifier
