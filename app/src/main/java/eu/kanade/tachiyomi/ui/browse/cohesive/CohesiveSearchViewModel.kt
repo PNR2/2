@@ -12,7 +12,6 @@ import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactory
 import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactoryKey
 import eu.kanade.tachiyomi.data.discovery.MergedManga
-import eu.kanade.tachiyomi.data.discovery.MergedMangaManager
 import eu.kanade.tachiyomi.data.discovery.MergedMangaReference
 import eu.kanade.tachiyomi.data.discovery.MergedMangaRepository
 import eu.kanade.tachiyomi.source.CatalogueSource
@@ -79,7 +78,7 @@ class CohesiveSearchViewModel(
 
                 _state.update { it.copy(progressText = "Searching extensions...") }
 
-                // 2. Get sources the same way Global Search does
+                // 2. Get sources
                 val sources = sourceManager.getAll()
                     .filterIsInstance<CatalogueSource>()
                     .filter { it.lang.equals("en", ignoreCase = true) || it.lang == "all" }
@@ -112,12 +111,13 @@ class CohesiveSearchViewModel(
                     .sortedByDescending { it.score }
                     .take(20)
 
-                // 4. Save references
+                // 4. Save references (now with source name)
                 accepted.forEach { match ->
                     repository.addReference(
                         MergedMangaReference(
                             mergedId = mergedId,
                             sourceId = match.sourceId,
+                            sourceName = match.sourceName,
                             mangaUrl = match.url,
                             mangaTitle = match.title,
                             chapterCount = 0,
@@ -165,6 +165,7 @@ class CohesiveSearchViewModel(
                     if (score >= 30) {
                         SearchMatch(
                             sourceId = source.id,
+                            sourceName = source.name,
                             url = manga.url,
                             title = manga.title,
                             score = score,
@@ -210,6 +211,7 @@ class CohesiveSearchViewModel(
 
     private data class SearchMatch(
         val sourceId: Long,
+        val sourceName: String,
         val url: String,
         val title: String,
         val score: Int,
