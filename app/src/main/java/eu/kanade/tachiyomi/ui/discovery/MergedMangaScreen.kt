@@ -44,12 +44,14 @@ import eu.kanade.tachiyomi.data.discovery.MergedManga
 import eu.kanade.tachiyomi.data.discovery.MergedMangaManager
 import eu.kanade.tachiyomi.data.discovery.MergedMangaReference
 import eu.kanade.tachiyomi.data.discovery.MergedMangaRepository
-import eu.kanade.tachiyomi.source.CatalogueSource
+import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -136,7 +138,6 @@ data class MergedMangaScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Re-link button
                     Button(
                         onClick = {
                             if (isRelinking) return@Button
@@ -170,10 +171,14 @@ data class MergedMangaScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Fetch chapters button
                     Button(
                         onClick = {
-                            if (isFetchingChapters || references.isEmpty() || sourceManager == null) return@Button
+                            if (isFetchingChapters || references.isEmpty() || sourceManager == null) {
+                                if (sourceManager == null) {
+                                    statusText = "SourceManager not available"
+                                }
+                                return@Button
+                            }
                             isFetchingChapters = true
                             statusText = "Fetching chapters from ${references.size} sources..."
                             scope.launch {
@@ -186,10 +191,6 @@ data class MergedMangaScreen(
                                         )
                                     }
                                     repository.addChapters(allChapters)
-                                    // Update chapter counts on references
-                                    allChapters.groupBy { it.sourceId to it.url }.forEach { (key, list) ->
-                                        // key is not exact; we update by source from refs
-                                    }
                                     references.forEach { ref ->
                                         val count = allChapters.count { it.sourceId == ref.sourceId }
                                         if (count > 0) {
@@ -227,7 +228,6 @@ data class MergedMangaScreen(
                     }
                 }
 
-                // Linked sources
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
@@ -253,14 +253,15 @@ data class MergedMangaScreen(
                             priority = ref.priority,
                             onClick = {
                                 navigator.push(
-                                    GlobalSearchScreen(searchQuery = ref.mangaTitle ?: mergedManga.title),
+                                    GlobalSearchScreen(
+                                        searchQuery = ref.mangaTitle ?: mergedManga.title,
+                                    ),
                                 )
                             },
                         )
                     }
                 }
 
-                // Chapters
                 item {
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
@@ -299,23 +300,23 @@ data class MergedMangaScreen(
         sourceManager: SourceManager,
         references: List<MergedMangaReference>,
         mergedId: Long,
-    ): List<MergedChapter> {
-        val results = references.map { ref ->
+    ): List<MergedChapter> = coroutineScope {
+        val deferredList = references.map { ref ->
             async {
                 try {
-                    val source = sourceManager.get(ref.sourceId) as? CatalogueSource
-                        ?: return@async emptyList()
+                    val source = sourceManager.get(ref.sourceId) as? HttpSource
+                        ?: return@async emptyList<MergedChapter>()
 
                     val sManga = SManga.create().apply {
                         url = ref.mangaUrl
                         title = ref.mangaTitle ?: ""
                     }
 
-                    val chapterList = withTimeoutOrNull(15000) {
+                    val chapterList: List<SChapter> = withTimeoutOrNull(15000) {
                         source.getChapterList(sManga)
-                    } ?: return@async emptyList()
+                    } ?: return@async emptyList<MergedChapter>()
 
-                    chapterList.map { ch ->
+                    chapterList.map { ch: SChapter ->
                         MergedChapter(
                             mergedId = mergedId,
                             sourceId = ref.sourceId,
@@ -330,11 +331,16 @@ data class MergedMangaScreen(
                     emptyList()
                 }
             }
-        }.awaitAll()
+        }
 
-        return results.flatten()
-            .distinctBy { it.sourceId.toString() + "_" + it.url }
-            .sortedBy { it.chapterNumber }
+        deferredList.awaitAll()
+            .flatten()
+            .distinctBy { chapter: MergedChapter ->
+                chapter.sourceId.toString() + "_" + chapter.url
+            }
+            .sortedBy { chapter: MergedChapter ->
+                chapter.chapterNumber
+            }
     }
 
     @Composable
