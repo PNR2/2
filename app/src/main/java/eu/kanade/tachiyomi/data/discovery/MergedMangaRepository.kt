@@ -1,3 +1,5 @@
+@file:Suppress("ktlint:standard:max-line-length")
+
 package eu.kanade.tachiyomi.data.discovery
 
 import android.content.ContentValues
@@ -27,6 +29,7 @@ data class MergedMangaReference(
     val id: Long = 0,
     val mergedId: Long,
     val sourceId: Long,
+    val sourceName: String? = null,
     val mangaUrl: String,
     val mangaTitle: String? = null,
     val chapterCount: Int = 0,
@@ -99,16 +102,10 @@ class MergedMangaRepository {
         }
     }
 
-    /**
-     * Create or update a merged manga.
-     * If an entry with the same malId or same title already exists, it is updated.
-     * Returns the id of the entry.
-     */
     fun createOrUpdateMergedManga(manga: MergedManga): Long {
         val db = dbHelper.writableDatabase
         val now = System.currentTimeMillis()
 
-        // Try to find existing entry
         var existingId: Long? = null
 
         if (manga.malId != null && manga.malId > 0) {
@@ -147,7 +144,6 @@ class MergedMangaRepository {
         }
 
         return if (existingId != null) {
-            // Update existing
             db.update(
                 "merged_manga",
                 values,
@@ -157,7 +153,6 @@ class MergedMangaRepository {
             refreshFlow()
             existingId
         } else {
-            // Insert new
             values.put("created_at", now)
             val id = db.insert("merged_manga", null, values)
             refreshFlow()
@@ -165,7 +160,6 @@ class MergedMangaRepository {
         }
     }
 
-    // Keep old name working for compatibility
     fun createMergedManga(manga: MergedManga): Long {
         return createOrUpdateMergedManga(manga)
     }
@@ -175,6 +169,7 @@ class MergedMangaRepository {
         val values = ContentValues().apply {
             put("merged_id", ref.mergedId)
             put("source_id", ref.sourceId)
+            put("source_name", ref.sourceName)
             put("manga_url", ref.mangaUrl)
             put("manga_title", ref.mangaTitle)
             put("chapter_count", ref.chapterCount)
@@ -246,11 +241,17 @@ class MergedMangaRepository {
 
             if (cursor.moveToFirst()) {
                 do {
+                    val sourceNameIndex = cursor.getColumnIndex("source_name")
                     list.add(
                         MergedMangaReference(
                             id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
                             mergedId = cursor.getLong(cursor.getColumnIndexOrThrow("merged_id")),
                             sourceId = cursor.getLong(cursor.getColumnIndexOrThrow("source_id")),
+                            sourceName = if (sourceNameIndex >= 0 && !cursor.isNull(sourceNameIndex)) {
+                                cursor.getString(sourceNameIndex)
+                            } else {
+                                null
+                            },
                             mangaUrl = cursor.getString(cursor.getColumnIndexOrThrow("manga_url")),
                             mangaTitle = cursor.getString(cursor.getColumnIndexOrThrow("manga_title")),
                             chapterCount = cursor.getInt(cursor.getColumnIndexOrThrow("chapter_count")),
