@@ -1,3 +1,5 @@
+@file:Suppress("ktlint:standard:max-line-length")
+
 package eu.kanade.tachiyomi.ui.discovery
 
 import androidx.compose.foundation.clickable
@@ -45,6 +47,9 @@ import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import tachiyomi.domain.source.service.SourceManager
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 data class MergedMangaScreen(
     private val mergedManga: MergedManga,
@@ -57,6 +62,14 @@ data class MergedMangaScreen(
         val repository = remember { MergedMangaRepository() }
         val manager = remember { MergedMangaManager() }
         val scope = rememberCoroutineScope()
+
+        val sourceManager = remember {
+            try {
+                Injekt.get<SourceManager>()
+            } catch (_: Exception) {
+                null
+            }
+        }
 
         var references by remember {
             mutableStateOf(repository.getReferences(mergedManga.id))
@@ -129,7 +142,6 @@ data class MergedMangaScreen(
                                             malId = mergedManga.malId,
                                         )
                                     }
-                                    // Refresh list
                                     references = repository.getReferences(mergedManga.id)
                                     statusText = "Done. Sources found: ${references.size}"
                                 } catch (e: Exception) {
@@ -173,10 +185,22 @@ data class MergedMangaScreen(
                     }
                 } else {
                     items(references) { ref ->
+                        val sourceName = remember(ref.sourceId) {
+                            sourceManager?.get(ref.sourceId)?.toString()
+                                ?: "Source ${ref.sourceId}"
+                        }
+
                         SourceCard(
-                            reference = ref,
+                            title = ref.mangaTitle ?: "Unknown title",
+                            sourceName = sourceName,
+                            priority = ref.priority,
                             onClick = {
-                                navigator.push(GlobalSearchScreen(mergedManga.title))
+                                // Open Global Search with the exact title of this match
+                                navigator.push(
+                                    GlobalSearchScreen(
+                                        searchQuery = ref.mangaTitle ?: mergedManga.title,
+                                    ),
+                                )
                             },
                         )
                     }
@@ -187,7 +211,9 @@ data class MergedMangaScreen(
 
     @Composable
     private fun SourceCard(
-        reference: MergedMangaReference,
+        title: String,
+        sourceName: String,
+        priority: Int,
         onClick: () -> Unit,
     ) {
         Card(
@@ -198,13 +224,19 @@ data class MergedMangaScreen(
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    text = reference.mangaTitle ?: "Unknown title",
+                    text = title,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Medium,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Source ID: ${reference.sourceId}  •  Priority: ${reference.priority}",
+                    text = sourceName,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Match score: $priority",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
