@@ -3,9 +3,11 @@
 package eu.kanade.tachiyomi.ui.discovery
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,12 +15,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -134,7 +138,13 @@ data class MergedMangaScreen(
                             state.references.isNotEmpty(),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (state.isFetchingChapters) "Fetching chapters..." else "Fetch chapters")
+                        Text(
+                            if (state.isFetchingChapters) {
+                                "Fetching chapters..."
+                            } else {
+                                "Fetch chapters"
+                            },
+                        )
                     }
 
                     if (state.statusText.isNotEmpty()) {
@@ -181,24 +191,73 @@ data class MergedMangaScreen(
                     }
                 }
 
+                if (state.allChapters.isNotEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Language",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            val filters = buildList {
+                                add("en")
+                                add("all")
+                                addAll(state.availableLanguages.filter { it != "en" })
+                            }.distinct()
+
+                            filters.forEach { lang ->
+                                FilterChip(
+                                    selected = state.languageFilter.equals(lang, ignoreCase = true),
+                                    onClick = { viewModel.setLanguageFilter(lang) },
+                                    label = {
+                                        Text(
+                                            when (lang.lowercase()) {
+                                                "en" -> "English"
+                                                "all" -> "All"
+                                                else -> lang.uppercase()
+                                            },
+                                        )
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+
                 item {
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val chapterTitle = if (state.allChapters.size != state.displayChapters.size) {
+                        "Chapters (${state.displayChapters.size})  ·  ${state.allChapters.size} raw"
+                    } else {
+                        "Chapters (${state.displayChapters.size})"
+                    }
                     Text(
-                        text = "Chapters (${state.chapters.size})",
+                        text = chapterTitle,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
 
-                if (state.chapters.isEmpty()) {
+                if (state.displayChapters.isEmpty()) {
                     item {
                         Text(
-                            text = "No chapters yet. Tap \"Fetch chapters\".",
+                            text = if (state.allChapters.isEmpty()) {
+                                "No chapters yet. Tap \"Fetch chapters\"."
+                            } else {
+                                "No chapters for this language. Try \"All\"."
+                            },
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 } else {
-                    items(state.chapters.take(150)) { chapter ->
+                    items(state.displayChapters) { chapter ->
                         val sourceName = state.references
                             .find { it.sourceId == chapter.sourceId }
                             ?.sourceName
@@ -208,15 +267,6 @@ data class MergedMangaScreen(
                             sourceName = sourceName,
                             onClick = { viewModel.openChapter(chapter) },
                         )
-                    }
-                    if (state.chapters.size > 150) {
-                        item {
-                            Text(
-                                text = "... and ${state.chapters.size - 150} more",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
                     }
                 }
             }
