@@ -55,6 +55,9 @@ data class MergedMangaScreen(
         }
         val state by viewModel.state.collectAsState()
 
+        val coverUrl = state.manga.coverUrl
+        val synopsis = state.manga.synopsis
+
         Scaffold(
             topBar = {
                 TopAppBar(
@@ -75,9 +78,9 @@ data class MergedMangaScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item {
-                    if (!state.manga.coverUrl.isNullOrEmpty()) {
+                    if (!coverUrl.isNullOrEmpty()) {
                         AsyncImage(
-                            model = state.manga.coverUrl,
+                            model = coverUrl,
                             contentDescription = "Cover",
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -93,10 +96,10 @@ data class MergedMangaScreen(
                         fontWeight = FontWeight.Bold,
                     )
 
-                    if (!state.manga.synopsis.isNullOrEmpty()) {
+                    if (!synopsis.isNullOrEmpty()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = state.manga.synopsis,
+                            text = synopsis,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
