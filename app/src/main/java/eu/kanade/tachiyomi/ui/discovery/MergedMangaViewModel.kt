@@ -39,7 +39,7 @@ import tachiyomi.domain.source.service.SourceManager
 
 @AssistedInject
 class MergedMangaViewModel(
-    @Assisted private val initialManga: MergedManga,
+    @Assisted private val mergedId: Long,
     private val sourceManager: SourceManager,
     private val networkToLocalManga: NetworkToLocalManga,
 ) : ViewModel() {
@@ -47,19 +47,34 @@ class MergedMangaViewModel(
     private val repository = MergedMangaRepository()
     private val manager = MergedMangaManager()
 
-    private val _state = MutableStateFlow(
-        State(
-            manga = initialManga,
-            references = repository.getReferences(initialManga.id),
-            chapters = repository.getChapters(initialManga.id),
-        ),
-    )
+    private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
     private val _openManga = MutableSharedFlow<Long>(extraBufferCapacity = 1)
     val openManga: SharedFlow<Long> = _openManga.asSharedFlow()
 
+    init {
+        load()
+    }
+
+    private fun load() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val manga = repository.getMergedMangaById(mergedId)
+            val refs = repository.getReferences(mergedId)
+            val chapters = repository.getChapters(mergedId)
+            _state.update {
+                it.copy(
+                    manga = manga,
+                    references = refs,
+                    chapters = chapters,
+                    isLoading = false,
+                )
+            }
+        }
+    }
+
     fun relink() {
+        val manga = _state.value.manga ?: return
         if (_state.value.isRelinking) return
         _state.update {
             it.copy(isRelinking = true, statusText = "Searching extensions...")
@@ -68,14 +83,14 @@ class MergedMangaViewModel(
             try {
                 withContext(Dispatchers.IO) {
                     manager.createOrUpdateMergedManga(
-                        title = initialManga.title,
-                        coverUrl = initialManga.coverUrl,
-                        synopsis = initialManga.synopsis,
-                        author = initialManga.author,
-                        malId = initialManga.malId,
+                        title = manga.title,
+                        coverUrl = manga.coverUrl,
+                        synopsis = manga.synopsis,
+                        author = manga.author,
+                        malId = manga.malId,
                     )
                 }
-                val refs = repository.getReferences(initialManga.id)
+                val refs = repository.getReferences(mergedId)
                 _state.update {
                     it.copy(
                         isRelinking = false,
@@ -110,7 +125,7 @@ class MergedMangaViewModel(
                 val allChapters = withContext(Dispatchers.IO) {
                     fetchChaptersFromSources(
                         references = current.references,
-                        mergedId = initialManga.id,
+                        mergedId = mergedId,
                     )
                 }
                 repository.addChapters(allChapters)
@@ -118,15 +133,15 @@ class MergedMangaViewModel(
                     val count = allChapters.count { it.sourceId == ref.sourceId }
                     if (count > 0) {
                         repository.updateReferenceChapterCount(
-                            mergedId = initialManga.id,
+                            mergedId = mergedId,
                             sourceId = ref.sourceId,
                             mangaUrl = ref.mangaUrl,
                             count = count,
                         )
                     }
                 }
-                val chapters = repository.getChapters(initialManga.id)
-                val refs = repository.getReferences(initialManga.id)
+                val chapters = repository.getChapters(mergedId)
+                val refs = repository.getReferences(mergedId)
                 _state.update {
                     it.copy(
                         isFetchingChapters = false,
@@ -146,17 +161,14 @@ class MergedMangaViewModel(
         }
     }
 
-    /**
-     * Opens the real manga page for the source that owns this chapter.
-     */
     fun openChapter(chapter: MergedChapter) {
         viewModelScope.launch {
             try {
-                _state.update { it.copy(statusText = "Opening chapter...") }
+                _state.update { it.copy(statusText = "Opening...") }
 
                 val ref = _state.value.references.find { it.sourceId == chapter.sourceId }
                     ?: run {
-                        _state.update { it.copy(statusText = "Source not found for chapter") }
+                        _state.update { it.copy(statusText = "Source not found") }
                         return@launch
                     }
 
@@ -166,15 +178,14 @@ class MergedMangaViewModel(
                         return@launch
                     }
 
+                val title = ref.mangaTitle ?: _state.value.manga?.title ?: ""
                 val sManga = SManga.create().apply {
                     url = ref.mangaUrl
-                    title = ref.mangaTitle ?: initialManga.title
-                    if (!initialManga.coverUrl.isNullOrEmpty()) {
-                        thumbnail_url = initialManga.coverUrl
-                    }
-                    if (!initialManga.synopsis.isNullOrEmpty()) {
-                        description = initialManga.synopsis
-                    }
+                    this.title = title
+                    val cover = _state.value.manga?.coverUrl
+                    if (!cover.isNullOrEmpty()) thumbnail_url = cover
+                    val syn = _state.value.manga?.synopsis
+                    if (!syn.isNullOrEmpty()) description = syn
                     initialized = true
                 }
 
@@ -263,9 +274,10 @@ class MergedMangaViewModel(
     }
 
     data class State(
-        val manga: MergedManga,
+        val manga: MergedManga? = null,
         val references: List<MergedMangaReference> = emptyList(),
         val chapters: List<MergedChapter> = emptyList(),
+        val isLoading: Boolean = true,
         val isRelinking: Boolean = false,
         val isFetchingChapters: Boolean = false,
         val statusText: String = "",
@@ -275,6 +287,6 @@ class MergedMangaViewModel(
     @ManualViewModelAssistedFactoryKey
     @ContributesIntoMap(AppScope::class)
     interface Factory : ManualViewModelAssistedFactory {
-        fun create(initialManga: MergedManga): MergedMangaViewModel
+        fun create(mergedId: Long): MergedMangaViewModel
     }
 }
