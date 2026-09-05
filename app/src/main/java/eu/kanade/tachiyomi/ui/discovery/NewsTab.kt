@@ -59,6 +59,7 @@ import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import cafe.adriel.voyager.navigator.tab.TabOptions
 import coil3.compose.AsyncImage
+import eu.kanade.presentation.util.Tab as VoyagerTab
 import eu.kanade.tachiyomi.data.discovery.DiscoveryProgressState
 import eu.kanade.tachiyomi.data.discovery.DiscoverySort
 import eu.kanade.tachiyomi.data.discovery.DiscoverySyncer
@@ -74,7 +75,6 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import eu.kanade.presentation.util.Tab as VoyagerTab
 
 object NewsTab : VoyagerTab {
 
@@ -305,8 +305,7 @@ object NewsTab : VoyagerTab {
                         coverUrl = manga.coverUrl,
                         score = null,
                         onClick = {
-                            // Open the new Merged Manga detail screen
-                            navigator.push(MergedMangaScreen(manga))
+                            navigator.push(MergedMangaScreen(mergedId = manga.id))
                         },
                     )
                 }
