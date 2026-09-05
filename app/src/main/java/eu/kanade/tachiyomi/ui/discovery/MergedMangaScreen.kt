@@ -26,6 +26,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -40,6 +41,8 @@ import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import eu.kanade.tachiyomi.data.discovery.MergedChapter
 import eu.kanade.tachiyomi.data.discovery.MergedManga
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
+import eu.kanade.tachiyomi.ui.manga.MangaScreen
+import kotlinx.coroutines.flow.collectLatest
 
 data class MergedMangaScreen(
     private val mergedManga: MergedManga,
@@ -57,6 +60,12 @@ data class MergedMangaScreen(
 
         val coverUrl = state.manga.coverUrl
         val synopsis = state.manga.synopsis
+
+        LaunchedEffect(viewModel) {
+            viewModel.openManga.collectLatest { mangaId ->
+                navigator.push(MangaScreen(mangaId = mangaId, fromSource = true))
+            }
+        }
 
         Scaffold(
             topBar = {
@@ -188,13 +197,21 @@ data class MergedMangaScreen(
                         )
                     }
                 } else {
-                    items(state.chapters.take(100)) { chapter ->
-                        ChapterCard(chapter = chapter)
+                    items(state.chapters.take(150)) { chapter ->
+                        val sourceName = state.references
+                            .find { it.sourceId == chapter.sourceId }
+                            ?.sourceName
+                            ?: "Source ${chapter.sourceId}"
+                        ChapterCard(
+                            chapter = chapter,
+                            sourceName = sourceName,
+                            onClick = { viewModel.openChapter(chapter) },
+                        )
                     }
-                    if (state.chapters.size > 100) {
+                    if (state.chapters.size > 150) {
                         item {
                             Text(
-                                text = "... and ${state.chapters.size - 100} more",
+                                text = "... and ${state.chapters.size - 150} more",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -246,9 +263,15 @@ data class MergedMangaScreen(
     }
 
     @Composable
-    private fun ChapterCard(chapter: MergedChapter) {
+    private fun ChapterCard(
+        chapter: MergedChapter,
+        sourceName: String,
+        onClick: () -> Unit,
+    ) {
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick),
             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
@@ -266,6 +289,8 @@ data class MergedMangaScreen(
                             if (isNotEmpty()) append(" • ")
                             append(chapter.language)
                         }
+                        if (isNotEmpty()) append(" • ")
+                        append(sourceName)
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
