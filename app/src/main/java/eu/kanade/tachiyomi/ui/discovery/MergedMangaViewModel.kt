@@ -23,19 +23,25 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import tachiyomi.domain.manga.interactor.NetworkToLocalManga
+import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
 
 @AssistedInject
 class MergedMangaViewModel(
     @Assisted private val initialManga: MergedManga,
     private val sourceManager: SourceManager,
+    private val networkToLocalManga: NetworkToLocalManga,
 ) : ViewModel() {
 
     private val repository = MergedMangaRepository()
@@ -49,6 +55,9 @@ class MergedMangaViewModel(
         ),
     )
     val state: StateFlow<State> = _state.asStateFlow()
+
+    private val _openManga = MutableSharedFlow<Long>(extraBufferCapacity = 1)
+    val openManga: SharedFlow<Long> = _openManga.asSharedFlow()
 
     fun relink() {
         if (_state.value.isRelinking) return
@@ -137,6 +146,51 @@ class MergedMangaViewModel(
         }
     }
 
+    /**
+     * Opens the real manga page for the source that owns this chapter.
+     * From there the user can read any chapter of that source.
+     */
+    fun openChapter(chapter: MergedChapter) {
+        viewModelScope.launch {
+            try {
+                _state.update { it.copy(statusText = "Opening chapter...") }
+
+                val ref = _state.value.references.find { it.sourceId == chapter.sourceId }
+                    ?: run {
+                        _state.update { it.copy(statusText = "Source not found for chapter") }
+                        return@launch
+                    }
+
+                val source = sourceManager.get(chapter.sourceId)
+                    ?: run {
+                        _state.update { it.copy(statusText = "Source not installed") }
+                        return@launch
+                    }
+
+                val sManga = SManga.create().apply {
+                    url = ref.mangaUrl
+                    title = ref.mangaTitle ?: initialManga.title
+                    if (!initialManga.coverUrl.isNullOrEmpty()) {
+                        thumbnail_url = initialManga.coverUrl
+                    }
+                    if (!initialManga.synopsis.isNullOrEmpty()) {
+                        description = initialManga.synopsis
+                    }
+                    initialized = true
+                }
+
+                val localManga: Manga = withContext(Dispatchers.IO) {
+                    networkToLocalManga(sManga.toDomainManga(source.id))
+                }
+
+                _openManga.emit(localManga.id)
+                _state.update { it.copy(statusText = "") }
+            } catch (e: Exception) {
+                _state.update { it.copy(statusText = "Open error: ${e.message}") }
+            }
+        }
+    }
+
     private suspend fun fetchChaptersFromSources(
         references: List<MergedMangaReference>,
         mergedId: Long,
@@ -182,7 +236,25 @@ class MergedMangaViewModel(
         deferredList.awaitAll()
             .flatten()
             .distinctBy { it.sourceId.toString() + "_" + it.url }
-            .sortedBy { it.chapterNumber }
+            .sortedWith(
+                compareBy<MergedChapter> { it.chapterNumber }
+                    .thenBy { it.name },
+            )
+    }
+
+    private fun SManga.toDomainManga(sourceId: Long): Manga {
+        return Manga.create().copy(
+            url = this.url,
+            title = this.title,
+            artist = this.artist,
+            author = this.author,
+            description = this.description,
+            genre = this.genre,
+            status = this.status.toLong(),
+            thumbnailUrl = this.thumbnail_url,
+            source = sourceId,
+            initialized = this.initialized,
+        )
     }
 
     data class State(
