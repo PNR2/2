@@ -39,13 +39,12 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
 import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import eu.kanade.tachiyomi.data.discovery.MergedChapter
-import eu.kanade.tachiyomi.data.discovery.MergedManga
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
 import kotlinx.coroutines.flow.collectLatest
 
 data class MergedMangaScreen(
-    private val mergedManga: MergedManga,
+    val mergedId: Long,
 ) : Screen {
 
     @OptIn(ExperimentalMaterial3Api::class)
@@ -54,12 +53,14 @@ data class MergedMangaScreen(
         val navigator = LocalNavigator.currentOrThrow
 
         val viewModel = assistedMetroViewModel<MergedMangaViewModel, MergedMangaViewModel.Factory> {
-            create(initialManga = mergedManga)
+            create(mergedId = mergedId)
         }
         val state by viewModel.state.collectAsState()
 
-        val coverUrl = state.manga.coverUrl
-        val synopsis = state.manga.synopsis
+        val manga = state.manga
+        val coverUrl = manga?.coverUrl
+        val synopsis = manga?.synopsis
+        val title = manga?.title ?: "..."
 
         LaunchedEffect(viewModel) {
             viewModel.openManga.collectLatest { mangaId ->
@@ -70,7 +71,7 @@ data class MergedMangaScreen(
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text(state.manga.title, maxLines = 1) },
+                    title = { Text(title, maxLines = 1) },
                     navigationIcon = {
                         IconButton(onClick = { navigator.pop() }) {
                             Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
@@ -100,7 +101,7 @@ data class MergedMangaScreen(
                     }
 
                     Text(
-                        text = state.manga.title,
+                        text = title,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                     )
@@ -118,7 +119,7 @@ data class MergedMangaScreen(
 
                     Button(
                         onClick = { viewModel.relink() },
-                        enabled = !state.isRelinking && !state.isFetchingChapters,
+                        enabled = !state.isRelinking && !state.isFetchingChapters && manga != null,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(if (state.isRelinking) "Linking..." else "Re-link sources")
@@ -172,7 +173,7 @@ data class MergedMangaScreen(
                             onClick = {
                                 navigator.push(
                                     GlobalSearchScreen(
-                                        searchQuery = ref.mangaTitle ?: state.manga.title,
+                                        searchQuery = ref.mangaTitle ?: title,
                                     ),
                                 )
                             },
