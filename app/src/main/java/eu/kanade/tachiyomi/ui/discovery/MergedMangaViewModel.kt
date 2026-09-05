@@ -149,12 +149,15 @@ class MergedMangaViewModel(
                 val chapters = repository.getChapters(mergedId)
                 val refs = repository.getReferences(mergedId)
                 _state.update {
-                    it.copy(
+                    val next = it.copy(
                         isFetchingChapters = false,
                         allChapters = chapters,
                         references = refs,
-                        statusText = "Fetched ${chapters.size} chapters → ${it.copy(allChapters = chapters).withFilteredChapters().displayChapters.size} unique",
                     ).withFilteredChapters()
+                    next.copy(
+                        statusText = "Fetched ${chapters.size} chapters → " +
+                            "${next.displayChapters.size} unique",
+                    )
                 }
             } catch (e: Exception) {
                 _state.update {
@@ -294,11 +297,13 @@ class MergedMangaViewModel(
             else -> allChapters.filter { ch ->
                 val lang = ch.language?.lowercase()?.trim().orEmpty()
                 lang == languageFilter.lowercase() ||
-                    (languageFilter.equals("en", ignoreCase = true) && (lang.isEmpty() || lang == "en" || lang == "gb"))
+                    (
+                        languageFilter.equals("en", ignoreCase = true) &&
+                            (lang.isEmpty() || lang == "en" || lang == "gb")
+                        )
             }
         }
 
-        // Group by chapter number (ignore -1 / unknown as separate by name)
         val grouped = languageFiltered.groupBy { ch ->
             if (ch.chapterNumber >= 0f) {
                 "n:${ch.chapterNumber}"
