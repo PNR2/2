@@ -255,10 +255,6 @@ class MergedMangaViewModel(
         deferredList.awaitAll()
             .flatten()
             .distinctBy { it.sourceId.toString() + "_" + it.url }
-            .sortedWith(
-                compareBy<MergedChapter> { it.chapterNumber }
-                    .thenBy { it.name },
-            )
     }
 
     private fun SManga.toDomainManga(sourceId: Long): Manga {
@@ -282,15 +278,28 @@ class MergedMangaViewModel(
         )
     }
 
-    /**
-     * Build one chapter per number:
-     * 1. Optional language filter
-     * 2. Prefer English
-     * 3. Prefer higher priority source
-     * 4. Prefer more recent upload
-     */
+    /** Extract a usable chapter number from SChapter number or from the title text. */
+    private fun effectiveNumber(ch: MergedChapter): Float {
+        if (ch.chapterNumber > 0f) return ch.chapterNumber
+
+        // Match patterns like: "Chapter 12", "Ch.12", "Ch 12.5", "Vol.1 Ch.3", "c12"
+        val patterns = listOf(
+            Regex("""(?i)(?:ch(?:apter)?\.?\s*)(\d+(?:\.\d+)?)"""),
+            Regex("""(?i)(?:c\.?\s*)(\d+(?:\.\d+)?)"""),
+            Regex("""(?i)^(\d+(?:\.\d+)?)(?:\s|$)"""),
+        )
+        for (p in patterns) {
+            val m = p.find(ch.name)
+            if (m != null) {
+                return m.groupValues[1].toFloatOrNull() ?: continue
+            }
+        }
+        return -1f
+    }
+
     private fun State.withFilteredChapters(): State {
         val refPriority = references.associate { it.sourceId to it.priority }
+        val refChapterCount = references.associate { it.sourceId to it.chapterCount }
 
         val languageFiltered = when {
             languageFilter.equals("all", ignoreCase = true) -> allChapters
@@ -304,9 +313,11 @@ class MergedMangaViewModel(
             }
         }
 
+        // Group by effective chapter number (or by name if unknown)
         val grouped = languageFiltered.groupBy { ch ->
-            if (ch.chapterNumber >= 0f) {
-                "n:${ch.chapterNumber}"
+            val n = effectiveNumber(ch)
+            if (n >= 0f) {
+                "n:$n"
             } else {
                 "t:${ch.name.trim().lowercase()}"
             }
@@ -317,9 +328,12 @@ class MergedMangaViewModel(
                 compareByDescending<MergedChapter> { ch ->
                     val lang = ch.language?.lowercase().orEmpty()
                     when {
-                        lang == "en" || lang == "gb" || lang.isEmpty() -> 2
+                        lang == "en" || lang == "gb" || lang.isEmpty() -> 3
                         else -> 0
                     }
+                }.thenByDescending { ch ->
+                    // Prefer sources that actually have many chapters for this manga
+                    refChapterCount[ch.sourceId] ?: 0
                 }.thenByDescending { ch ->
                     refPriority[ch.sourceId] ?: 0
                 }.thenByDescending { ch ->
@@ -327,8 +341,8 @@ class MergedMangaViewModel(
                 },
             ).first()
         }.sortedWith(
-            compareBy<MergedChapter> { it.chapterNumber }
-                .thenBy { it.name },
+            compareBy<MergedChapter> { effectiveNumber(it) }
+                .thenBy { it.name.lowercase() },
         )
 
         val languages = allChapters
