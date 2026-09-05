@@ -26,11 +26,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -39,25 +36,10 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
+import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import eu.kanade.tachiyomi.data.discovery.MergedChapter
 import eu.kanade.tachiyomi.data.discovery.MergedManga
-import eu.kanade.tachiyomi.data.discovery.MergedMangaManager
-import eu.kanade.tachiyomi.data.discovery.MergedMangaReference
-import eu.kanade.tachiyomi.data.discovery.MergedMangaRepository
-import eu.kanade.tachiyomi.source.Source
-import eu.kanade.tachiyomi.source.model.SChapter
-import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
-import tachiyomi.domain.source.service.SourceManager
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 
 data class MergedMangaScreen(
     private val mergedManga: MergedManga,
@@ -67,32 +49,16 @@ data class MergedMangaScreen(
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
-        val repository = remember { MergedMangaRepository() }
-        val manager = remember { MergedMangaManager() }
-        val scope = rememberCoroutineScope()
 
-        val sourceManager = remember {
-            try {
-                Injekt.get<SourceManager>()
-            } catch (_: Exception) {
-                null
-            }
+        val viewModel = assistedMetroViewModel<MergedMangaViewModel, MergedMangaViewModel.Factory> {
+            create(initialManga = mergedManga)
         }
-
-        var references by remember {
-            mutableStateOf(repository.getReferences(mergedManga.id))
-        }
-        var chapters by remember {
-            mutableStateOf(repository.getChapters(mergedManga.id))
-        }
-        var isRelinking by remember { mutableStateOf(false) }
-        var isFetchingChapters by remember { mutableStateOf(false) }
-        var statusText by remember { mutableStateOf("") }
+        val state by viewModel.state.collectAsState()
 
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text(mergedManga.title, maxLines = 1) },
+                    title = { Text(state.manga.title, maxLines = 1) },
                     navigationIcon = {
                         IconButton(onClick = { navigator.pop() }) {
                             Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
@@ -109,9 +75,9 @@ data class MergedMangaScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item {
-                    if (!mergedManga.coverUrl.isNullOrEmpty()) {
+                    if (!state.manga.coverUrl.isNullOrEmpty()) {
                         AsyncImage(
-                            model = mergedManga.coverUrl,
+                            model = state.manga.coverUrl,
                             contentDescription = "Cover",
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -122,15 +88,15 @@ data class MergedMangaScreen(
                     }
 
                     Text(
-                        text = mergedManga.title,
+                        text = state.manga.title,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                     )
 
-                    if (!mergedManga.synopsis.isNullOrEmpty()) {
+                    if (!state.manga.synopsis.isNullOrEmpty()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = mergedManga.synopsis,
+                            text = state.manga.synopsis,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -139,89 +105,29 @@ data class MergedMangaScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Button(
-                        onClick = {
-                            if (isRelinking) return@Button
-                            isRelinking = true
-                            statusText = "Searching extensions..."
-                            scope.launch {
-                                try {
-                                    withContext(Dispatchers.IO) {
-                                        manager.createOrUpdateMergedManga(
-                                            title = mergedManga.title,
-                                            coverUrl = mergedManga.coverUrl,
-                                            synopsis = mergedManga.synopsis,
-                                            author = mergedManga.author,
-                                            malId = mergedManga.malId,
-                                        )
-                                    }
-                                    references = repository.getReferences(mergedManga.id)
-                                    statusText = "Done. Sources: ${references.size}"
-                                } catch (e: Exception) {
-                                    statusText = "Error: ${e.message}"
-                                } finally {
-                                    isRelinking = false
-                                }
-                            }
-                        },
-                        enabled = !isRelinking && !isFetchingChapters,
+                        onClick = { viewModel.relink() },
+                        enabled = !state.isRelinking && !state.isFetchingChapters,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (isRelinking) "Linking..." else "Re-link sources")
+                        Text(if (state.isRelinking) "Linking..." else "Re-link sources")
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Button(
-                        onClick = {
-                            if (isFetchingChapters || references.isEmpty() || sourceManager == null) {
-                                if (sourceManager == null) {
-                                    statusText = "SourceManager not available"
-                                }
-                                return@Button
-                            }
-                            isFetchingChapters = true
-                            statusText = "Fetching chapters from ${references.size} sources..."
-                            scope.launch {
-                                try {
-                                    val allChapters = withContext(Dispatchers.IO) {
-                                        fetchChaptersFromSources(
-                                            sourceManager = sourceManager,
-                                            references = references,
-                                            mergedId = mergedManga.id,
-                                        )
-                                    }
-                                    repository.addChapters(allChapters)
-                                    references.forEach { ref ->
-                                        val count = allChapters.count { it.sourceId == ref.sourceId }
-                                        if (count > 0) {
-                                            repository.updateReferenceChapterCount(
-                                                mergedId = mergedManga.id,
-                                                sourceId = ref.sourceId,
-                                                mangaUrl = ref.mangaUrl,
-                                                count = count,
-                                            )
-                                        }
-                                    }
-                                    chapters = repository.getChapters(mergedManga.id)
-                                    references = repository.getReferences(mergedManga.id)
-                                    statusText = "Fetched ${chapters.size} chapters"
-                                } catch (e: Exception) {
-                                    statusText = "Error: ${e.message}"
-                                } finally {
-                                    isFetchingChapters = false
-                                }
-                            }
-                        },
-                        enabled = !isFetchingChapters && !isRelinking && references.isNotEmpty(),
+                        onClick = { viewModel.fetchChapters() },
+                        enabled = !state.isFetchingChapters &&
+                            !state.isRelinking &&
+                            state.references.isNotEmpty(),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (isFetchingChapters) "Fetching chapters..." else "Fetch chapters")
+                        Text(if (state.isFetchingChapters) "Fetching chapters..." else "Fetch chapters")
                     }
 
-                    if (statusText.isNotEmpty()) {
+                    if (state.statusText.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = statusText,
+                            text = state.statusText,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                         )
@@ -231,21 +137,21 @@ data class MergedMangaScreen(
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Linked Sources (${references.size})",
+                        text = "Linked Sources (${state.references.size})",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
 
-                if (references.isEmpty()) {
+                if (state.references.isEmpty()) {
                     item {
                         Text(
-                            text = "No sources linked yet.",
+                            text = "No sources linked yet. Tap \"Re-link sources\".",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 } else {
-                    items(references) { ref ->
+                    items(state.references) { ref ->
                         SourceCard(
                             title = ref.mangaTitle ?: "Unknown",
                             sourceName = ref.sourceName ?: "Source ${ref.sourceId}",
@@ -254,7 +160,7 @@ data class MergedMangaScreen(
                             onClick = {
                                 navigator.push(
                                     GlobalSearchScreen(
-                                        searchQuery = ref.mangaTitle ?: mergedManga.title,
+                                        searchQuery = ref.mangaTitle ?: state.manga.title,
                                     ),
                                 )
                             },
@@ -265,13 +171,13 @@ data class MergedMangaScreen(
                 item {
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Chapters (${chapters.size})",
+                        text = "Chapters (${state.chapters.size})",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
 
-                if (chapters.isEmpty()) {
+                if (state.chapters.isEmpty()) {
                     item {
                         Text(
                             text = "No chapters yet. Tap \"Fetch chapters\".",
@@ -279,13 +185,13 @@ data class MergedMangaScreen(
                         )
                     }
                 } else {
-                    items(chapters.take(100)) { chapter ->
+                    items(state.chapters.take(100)) { chapter ->
                         ChapterCard(chapter = chapter)
                     }
-                    if (chapters.size > 100) {
+                    if (state.chapters.size > 100) {
                         item {
                             Text(
-                                text = "... and ${chapters.size - 100} more",
+                                text = "... and ${state.chapters.size - 100} more",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -294,59 +200,6 @@ data class MergedMangaScreen(
                 }
             }
         }
-    }
-
-    private suspend fun fetchChaptersFromSources(
-        sourceManager: SourceManager,
-        references: List<MergedMangaReference>,
-        mergedId: Long,
-    ): List<MergedChapter> = coroutineScope {
-        val deferredList = references.map { ref ->
-            async {
-                try {
-                    val source: Source = sourceManager.get(ref.sourceId)
-                        ?: return@async emptyList<MergedChapter>()
-
-                    val sManga = SManga.create().apply {
-                        url = ref.mangaUrl
-                        title = ref.mangaTitle ?: ""
-                    }
-
-                    val chapterList: List<SChapter> = withTimeoutOrNull(20000) {
-                        val update = source.getMangaUpdate(
-                            manga = sManga,
-                            chapters = emptyList(),
-                            fetchDetails = false,
-                            fetchChapters = true,
-                        )
-                        update.chapters
-                    } ?: return@async emptyList<MergedChapter>()
-
-                    chapterList.map { ch: SChapter ->
-                        MergedChapter(
-                            mergedId = mergedId,
-                            sourceId = ref.sourceId,
-                            url = ch.url,
-                            name = ch.name,
-                            chapterNumber = ch.chapter_number,
-                            language = source.lang,
-                            dateUpload = ch.date_upload,
-                        )
-                    }
-                } catch (_: Exception) {
-                    emptyList()
-                }
-            }
-        }
-
-        deferredList.awaitAll()
-            .flatten()
-            .distinctBy { chapter: MergedChapter ->
-                chapter.sourceId.toString() + "_" + chapter.url
-            }
-            .sortedBy { chapter: MergedChapter ->
-                chapter.chapterNumber
-            }
     }
 
     @Composable
