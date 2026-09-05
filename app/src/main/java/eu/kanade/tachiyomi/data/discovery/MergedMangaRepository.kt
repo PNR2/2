@@ -102,6 +102,44 @@ class MergedMangaRepository {
         }
     }
 
+    fun getMergedMangaById(id: Long): MergedManga? {
+        return try {
+            val db = dbHelper.readableDatabase
+            val cursor = db.rawQuery(
+                "SELECT * FROM merged_manga WHERE id = ? LIMIT 1",
+                arrayOf(id.toString()),
+            )
+            var result: MergedManga? = null
+            if (cursor.moveToFirst()) {
+                val malIdIndex = cursor.getColumnIndex("mal_id")
+                result = MergedManga(
+                    id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
+                    title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
+                    coverUrl = cursor.getString(cursor.getColumnIndexOrThrow("cover_url")),
+                    synopsis = cursor.getString(cursor.getColumnIndexOrThrow("synopsis")),
+                    author = cursor.getString(cursor.getColumnIndexOrThrow("author")),
+                    artist = cursor.getString(cursor.getColumnIndexOrThrow("artist")),
+                    status = cursor.getString(cursor.getColumnIndexOrThrow("status")),
+                    genres = cursor.getString(cursor.getColumnIndexOrThrow("genres")),
+                    malId = if (malIdIndex >= 0 && !cursor.isNull(malIdIndex)) {
+                        cursor.getLong(malIdIndex)
+                    } else {
+                        null
+                    },
+                    preferredLanguage = cursor.getString(
+                        cursor.getColumnIndexOrThrow("preferred_language"),
+                    ) ?: "en",
+                    createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
+                    updatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("updated_at")),
+                )
+            }
+            cursor.close()
+            result
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun createOrUpdateMergedManga(manga: MergedManga): Long {
         val db = dbHelper.writableDatabase
         val now = System.currentTimeMillis()
