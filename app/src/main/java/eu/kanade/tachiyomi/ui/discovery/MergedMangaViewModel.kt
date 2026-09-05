@@ -148,7 +148,6 @@ class MergedMangaViewModel(
 
     /**
      * Opens the real manga page for the source that owns this chapter.
-     * From there the user can read any chapter of that source.
      */
     fun openChapter(chapter: MergedChapter) {
         viewModelScope.launch {
@@ -243,13 +242,19 @@ class MergedMangaViewModel(
     }
 
     private fun SManga.toDomainManga(sourceId: Long): Manga {
+        val genreList: List<String>? = this.genre
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?.ifEmpty { null }
+
         return Manga.create().copy(
             url = this.url,
             title = this.title,
             artist = this.artist,
             author = this.author,
             description = this.description,
-            genre = this.genre,
+            genre = genreList,
             status = this.status.toLong(),
             thumbnailUrl = this.thumbnail_url,
             source = sourceId,
