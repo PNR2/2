@@ -65,7 +65,6 @@ private fun CohesiveSearchContent(
     val navigator = LocalNavigator.currentOrThrow
     val focusManager = LocalFocusManager.current
 
-    // ViewModel is created once with empty query
     val viewModel = assistedMetroViewModel<CohesiveSearchViewModel, CohesiveSearchViewModel.Factory> {
         create(initialQuery = "")
     }
@@ -141,7 +140,7 @@ private fun CohesiveSearchContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    navigator.push(MergedMangaScreen(manga))
+                                    navigator.push(MergedMangaScreen(mergedId = manga.id))
                                 },
                             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                         ) {
