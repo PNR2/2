@@ -66,10 +66,16 @@ class MergedMangaViewModel(
                 it.copy(
                     manga = manga,
                     references = refs,
-                    chapters = chapters,
+                    allChapters = chapters,
                     isLoading = false,
-                )
+                ).withFilteredChapters()
             }
+        }
+    }
+
+    fun setLanguageFilter(filter: String) {
+        _state.update {
+            it.copy(languageFilter = filter).withFilteredChapters()
         }
     }
 
@@ -145,10 +151,10 @@ class MergedMangaViewModel(
                 _state.update {
                     it.copy(
                         isFetchingChapters = false,
-                        chapters = chapters,
+                        allChapters = chapters,
                         references = refs,
-                        statusText = "Fetched ${chapters.size} chapters",
-                    )
+                        statusText = "Fetched ${chapters.size} chapters → ${it.copy(allChapters = chapters).withFilteredChapters().displayChapters.size} unique",
+                    ).withFilteredChapters()
                 }
             } catch (e: Exception) {
                 _state.update {
@@ -273,10 +279,72 @@ class MergedMangaViewModel(
         )
     }
 
+    /**
+     * Build one chapter per number:
+     * 1. Optional language filter
+     * 2. Prefer English
+     * 3. Prefer higher priority source
+     * 4. Prefer more recent upload
+     */
+    private fun State.withFilteredChapters(): State {
+        val refPriority = references.associate { it.sourceId to it.priority }
+
+        val languageFiltered = when {
+            languageFilter.equals("all", ignoreCase = true) -> allChapters
+            else -> allChapters.filter { ch ->
+                val lang = ch.language?.lowercase()?.trim().orEmpty()
+                lang == languageFilter.lowercase() ||
+                    (languageFilter.equals("en", ignoreCase = true) && (lang.isEmpty() || lang == "en" || lang == "gb"))
+            }
+        }
+
+        // Group by chapter number (ignore -1 / unknown as separate by name)
+        val grouped = languageFiltered.groupBy { ch ->
+            if (ch.chapterNumber >= 0f) {
+                "n:${ch.chapterNumber}"
+            } else {
+                "t:${ch.name.trim().lowercase()}"
+            }
+        }
+
+        val unique = grouped.values.map { group ->
+            group.sortedWith(
+                compareByDescending<MergedChapter> { ch ->
+                    val lang = ch.language?.lowercase().orEmpty()
+                    when {
+                        lang == "en" || lang == "gb" || lang.isEmpty() -> 2
+                        else -> 0
+                    }
+                }.thenByDescending { ch ->
+                    refPriority[ch.sourceId] ?: 0
+                }.thenByDescending { ch ->
+                    ch.dateUpload
+                },
+            ).first()
+        }.sortedWith(
+            compareBy<MergedChapter> { it.chapterNumber }
+                .thenBy { it.name },
+        )
+
+        val languages = allChapters
+            .mapNotNull { it.language?.lowercase()?.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .sorted()
+
+        return copy(
+            displayChapters = unique,
+            availableLanguages = languages,
+        )
+    }
+
     data class State(
         val manga: MergedManga? = null,
         val references: List<MergedMangaReference> = emptyList(),
-        val chapters: List<MergedChapter> = emptyList(),
+        val allChapters: List<MergedChapter> = emptyList(),
+        val displayChapters: List<MergedChapter> = emptyList(),
+        val availableLanguages: List<String> = emptyList(),
+        val languageFilter: String = "en",
         val isLoading: Boolean = true,
         val isRelinking: Boolean = false,
         val isFetchingChapters: Boolean = false,
