@@ -11,6 +11,7 @@ import dev.zacsweers.metro.AssistedInject
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactory
 import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactoryKey
+import eu.kanade.domain.chapter.interactor.SyncChaptersWithSource
 import eu.kanade.tachiyomi.data.discovery.MergedChapter
 import eu.kanade.tachiyomi.data.discovery.MergedManga
 import eu.kanade.tachiyomi.data.discovery.MergedMangaManager
@@ -19,7 +20,6 @@ import eu.kanade.tachiyomi.data.discovery.MergedMangaRepository
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -34,12 +34,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import tachiyomi.domain.chapter.interactor.GetChapter
-import tachiyomi.domain.chapter.interactor.ShouldUpdateDbChapter
-import tachiyomi.domain.chapter.interactor.SyncChaptersWithSource
-import tachiyomi.domain.chapter.interactor.UpdateChapter
-import tachiyomi.domain.chapter.model.Chapter
-import tachiyomi.domain.chapter.model.ChapterUpdate
+import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
@@ -50,7 +45,7 @@ class MergedMangaViewModel(
     private val sourceManager: SourceManager,
     private val networkToLocalManga: NetworkToLocalManga,
     private val syncChaptersWithSource: SyncChaptersWithSource,
-    private val getChapter: GetChapter,
+    private val getChaptersByMangaId: GetChaptersByMangaId,
 ) : ViewModel() {
 
     private val repository = MergedMangaRepository()
@@ -59,7 +54,6 @@ class MergedMangaViewModel(
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
-    /** mangaId + chapterId → open ReaderActivity */
     private val _openReader = MutableSharedFlow<OpenReader>(extraBufferCapacity = 1)
     val openReader: SharedFlow<OpenReader> = _openReader.asSharedFlow()
 
@@ -181,11 +175,7 @@ class MergedMangaViewModel(
     }
 
     /**
-     * Unified read:
-     * 1) Resolve source + local manga
-     * 2) Sync that source's chapters into DB
-     * 3) Find chapter by URL
-     * 4) Open ReaderActivity on that chapter
+     * Unified read: sync source chapters into DB, resolve chapter, open reader.
      */
     fun openChapter(mergedChapter: MergedChapter) {
         viewModelScope.launch {
@@ -218,8 +208,7 @@ class MergedMangaViewModel(
                 val result = withContext(Dispatchers.IO) {
                     val localManga = networkToLocalManga(sManga.toDomainManga(source.id))
 
-                    // Pull chapter list from source and sync into DB
-                    val remoteChapters: List<SChapter> = withTimeoutOrNull(20000) {
+                    val remoteChapters: List<SChapter> = withTimeoutOrNull(25000) {
                         val update = source.getMangaUpdate(
                             manga = sManga,
                             chapters = emptyList(),
@@ -231,42 +220,33 @@ class MergedMangaViewModel(
 
                     if (remoteChapters.isNotEmpty()) {
                         try {
-                            syncChaptersWithSource.await(remoteChapters, localManga, source)
+                            syncChaptersWithSource.await(
+                                rawSourceChapters = remoteChapters,
+                                manga = localManga,
+                                source = source,
+                                manualFetch = true,
+                            )
                         } catch (_: Exception) {
-                            // still try to resolve chapter below
                         }
                     }
 
-                    // Prefer exact URL match
-                    var dbChapter = getChapter.await(mergedChapter.url, localManga.id)
+                    val dbChapters = getChaptersByMangaId.await(localManga.id)
 
-                    // Fallback: match by chapter number
+                    var dbChapter = dbChapters.find { it.url == mergedChapter.url }
+
                     if (dbChapter == null) {
                         val targetNum = effectiveNumber(mergedChapter)
                         if (targetNum >= 0f) {
-                            val all = remoteChapters // already synced; resolve via getChapter by each url
-                            for (sc in all) {
-                                val n = if (sc.chapter_number > 0f) {
-                                    sc.chapter_number
-                                } else {
-                                    -1f
-                                }
-                                if (n == targetNum) {
-                                    dbChapter = getChapter.await(sc.url, localManga.id)
-                                    if (dbChapter != null) break
-                                }
+                            dbChapter = dbChapters.find { ch ->
+                                ch.chapterNumber == targetNum.toDouble() ||
+                                    kotlin.math.abs(ch.chapterNumber - targetNum.toDouble()) < 0.001
                             }
                         }
                     }
 
-                    // Last fallback: create a temporary match using the merged URL after sync
-                    if (dbChapter == null && remoteChapters.isNotEmpty()) {
-                        val byName = remoteChapters.find {
-                            it.url == mergedChapter.url ||
-                                it.name.equals(mergedChapter.name, ignoreCase = true)
-                        }
-                        if (byName != null) {
-                            dbChapter = getChapter.await(byName.url, localManga.id)
+                    if (dbChapter == null) {
+                        dbChapter = dbChapters.find {
+                            it.name.equals(mergedChapter.name, ignoreCase = true)
                         }
                     }
 
@@ -363,9 +343,9 @@ class MergedMangaViewModel(
     private fun effectiveNumber(ch: MergedChapter): Float {
         if (ch.chapterNumber > 0f) return ch.chapterNumber
         val patterns = listOf(
-            Regex("""(?i)(?:ch(?:apter)?\.?\s*)(\d+(?:\.\d+)?)"""),
-            Regex("""(?i)(?:c\.?\s*)(\d+(?:\.\d+)?)"""),
-            Regex("""(?i)^(\d+(?:\.\d+)?)(?:\s|$)"""),
+            Regex("""(?i)(?:ch(?:apter)?[.]?[ ]*)([0-9]+(?:[.][0-9]+)?)"""),
+            Regex("""(?i)(?:c[.]?[ ]*)([0-9]+(?:[.][0-9]+)?)"""),
+            Regex("""(?i)^([0-9]+(?:[.][0-9]+)?)(?:[ ]|$)"""),
         )
         for (p in patterns) {
             val m = p.find(ch.name)
