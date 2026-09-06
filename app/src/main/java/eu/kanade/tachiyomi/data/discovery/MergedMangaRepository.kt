@@ -68,24 +68,7 @@ class MergedMangaRepository {
                 val list = mutableListOf<MergedManga>()
                 if (cursor.moveToFirst()) {
                     do {
-                        list.add(
-                            MergedManga(
-                                id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
-                                title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
-                                coverUrl = cursor.getString(cursor.getColumnIndexOrThrow("cover_url")),
-                                synopsis = cursor.getString(cursor.getColumnIndexOrThrow("synopsis")),
-                                author = cursor.getString(cursor.getColumnIndexOrThrow("author")),
-                                artist = cursor.getString(cursor.getColumnIndexOrThrow("artist")),
-                                status = cursor.getString(cursor.getColumnIndexOrThrow("status")),
-                                genres = cursor.getString(cursor.getColumnIndexOrThrow("genres")),
-                                malId = cursor.getLongOrNull("mal_id"),
-                                preferredLanguage = cursor.getString(
-                                    cursor.getColumnIndexOrThrow("preferred_language"),
-                                ) ?: "en",
-                                createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
-                                updatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("updated_at")),
-                            ),
-                        )
+                        list.add(readMergedManga(cursor))
                     } while (cursor.moveToNext())
                 }
                 cursor.close()
@@ -94,13 +77,30 @@ class MergedMangaRepository {
             }
         }
 
-        private fun android.database.Cursor.getLongOrNull(column: String): Long? {
-            val idx = getColumnIndex(column)
-            if (idx < 0 || isNull(idx)) return null
-            return getLong(idx)
+        private fun readMergedManga(cursor: android.database.Cursor): MergedManga {
+            val malIdx = cursor.getColumnIndex("mal_id")
+            return MergedManga(
+                id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
+                title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
+                coverUrl = cursor.getString(cursor.getColumnIndexOrThrow("cover_url")),
+                synopsis = cursor.getString(cursor.getColumnIndexOrThrow("synopsis")),
+                author = cursor.getString(cursor.getColumnIndexOrThrow("author")),
+                artist = cursor.getString(cursor.getColumnIndexOrThrow("artist")),
+                status = cursor.getString(cursor.getColumnIndexOrThrow("status")),
+                genres = cursor.getString(cursor.getColumnIndexOrThrow("genres")),
+                malId = if (malIdx >= 0 && !cursor.isNull(malIdx)) cursor.getLong(malIdx) else null,
+                preferredLanguage = cursor.getString(
+                    cursor.getColumnIndexOrThrow("preferred_language"),
+                ) ?: "en",
+                createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
+                updatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("updated_at")),
+            )
         }
     }
 
+    /**
+     * Primary API used by Manager + CohesiveSearchViewModel
+     */
     fun createOrUpdateMergedManga(
         title: String,
         coverUrl: String? = null,
@@ -114,8 +114,8 @@ class MergedMangaRepository {
     ): Long {
         val db = dbHelper.writableDatabase
         val now = System.currentTimeMillis()
+        val cleanTitle = title.trim()
 
-        // Find existing by title (case-insensitive) or malId
         var existingId: Long? = null
         if (malId != null && malId > 0) {
             val c = db.rawQuery(
@@ -128,14 +128,14 @@ class MergedMangaRepository {
         if (existingId == null) {
             val c = db.rawQuery(
                 "SELECT id FROM merged_manga WHERE LOWER(title) = LOWER(?) LIMIT 1",
-                arrayOf(title.trim()),
+                arrayOf(cleanTitle),
             )
             if (c.moveToFirst()) existingId = c.getLong(0)
             c.close()
         }
 
         val values = ContentValues().apply {
-            put("title", title.trim())
+            put("title", cleanTitle)
             put("cover_url", coverUrl)
             put("synopsis", synopsis)
             put("author", author)
@@ -164,10 +164,24 @@ class MergedMangaRepository {
         return id
     }
 
+    /** Convenience overload */
+    fun createOrUpdateMergedManga(manga: MergedManga): Long {
+        return createOrUpdateMergedManga(
+            title = manga.title,
+            coverUrl = manga.coverUrl,
+            synopsis = manga.synopsis,
+            author = manga.author,
+            artist = manga.artist,
+            status = manga.status,
+            genres = manga.genres,
+            malId = manga.malId,
+            preferredLanguage = manga.preferredLanguage,
+        )
+    }
+
     fun clearReferences(mergedId: Long) {
         try {
-            val db = dbHelper.writableDatabase
-            db.delete(
+            dbHelper.writableDatabase.delete(
                 "merged_manga_reference",
                 "merged_id = ?",
                 arrayOf(mergedId.toString()),
@@ -177,23 +191,45 @@ class MergedMangaRepository {
     }
 
     fun addReference(ref: MergedMangaReference) {
-        val db = dbHelper.writableDatabase
-        val values = ContentValues().apply {
-            put("merged_id", ref.mergedId)
-            put("source_id", ref.sourceId)
-            put("manga_url", ref.mangaUrl)
-            put("manga_title", ref.mangaTitle)
-            put("chapter_count", ref.chapterCount)
-            put("is_info_source", if (ref.isInfoSource) 1 else 0)
-            put("priority", ref.priority)
-            put("source_name", ref.sourceName)
+        try {
+            val db = dbHelper.writableDatabase
+            val values = ContentValues().apply {
+                put("merged_id", ref.mergedId)
+                put("source_id", ref.sourceId)
+                put("manga_url", ref.mangaUrl)
+                put("manga_title", ref.mangaTitle)
+                put("chapter_count", ref.chapterCount)
+                put("is_info_source", if (ref.isInfoSource) 1 else 0)
+                put("priority", ref.priority)
+                put("source_name", ref.sourceName)
+            }
+            db.insertWithOnConflict(
+                "merged_manga_reference",
+                null,
+                values,
+                SQLiteDatabase.CONFLICT_REPLACE,
+            )
+        } catch (_: Exception) {
+            try {
+                val db = dbHelper.writableDatabase
+                val values = ContentValues().apply {
+                    put("merged_id", ref.mergedId)
+                    put("source_id", ref.sourceId)
+                    put("manga_url", ref.mangaUrl)
+                    put("manga_title", ref.mangaTitle)
+                    put("chapter_count", ref.chapterCount)
+                    put("is_info_source", if (ref.isInfoSource) 1 else 0)
+                    put("priority", ref.priority)
+                }
+                db.insertWithOnConflict(
+                    "merged_manga_reference",
+                    null,
+                    values,
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
+            } catch (_: Exception) {
+            }
         }
-        db.insertWithOnConflict(
-            "merged_manga_reference",
-            null,
-            values,
-            SQLiteDatabase.CONFLICT_REPLACE,
-        )
     }
 
     fun updateReferenceChapterCount(
@@ -203,11 +239,8 @@ class MergedMangaRepository {
         count: Int,
     ) {
         try {
-            val db = dbHelper.writableDatabase
-            val values = ContentValues().apply {
-                put("chapter_count", count)
-            }
-            db.update(
+            val values = ContentValues().apply { put("chapter_count", count) }
+            dbHelper.writableDatabase.update(
                 "merged_manga_reference",
                 values,
                 "merged_id = ? AND source_id = ? AND manga_url = ?",
@@ -219,31 +252,12 @@ class MergedMangaRepository {
 
     fun getMergedMangaById(id: Long): MergedManga? {
         try {
-            val db = dbHelper.readableDatabase
-            val cursor = db.rawQuery(
+            val cursor = dbHelper.readableDatabase.rawQuery(
                 "SELECT * FROM merged_manga WHERE id = ? LIMIT 1",
                 arrayOf(id.toString()),
             )
             if (cursor.moveToFirst()) {
-                val manga = MergedManga(
-                    id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
-                    title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
-                    coverUrl = cursor.getString(cursor.getColumnIndexOrThrow("cover_url")),
-                    synopsis = cursor.getString(cursor.getColumnIndexOrThrow("synopsis")),
-                    author = cursor.getString(cursor.getColumnIndexOrThrow("author")),
-                    artist = cursor.getString(cursor.getColumnIndexOrThrow("artist")),
-                    status = cursor.getString(cursor.getColumnIndexOrThrow("status")),
-                    genres = cursor.getString(cursor.getColumnIndexOrThrow("genres")),
-                    malId = run {
-                        val idx = cursor.getColumnIndex("mal_id")
-                        if (idx >= 0 && !cursor.isNull(idx)) cursor.getLong(idx) else null
-                    },
-                    preferredLanguage = cursor.getString(
-                        cursor.getColumnIndexOrThrow("preferred_language"),
-                    ) ?: "en",
-                    createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
-                    updatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("updated_at")),
-                )
+                val manga = readMergedManga(cursor)
                 cursor.close()
                 return manga
             }
@@ -256,14 +270,13 @@ class MergedMangaRepository {
     fun getReferences(mergedId: Long): List<MergedMangaReference> {
         val list = mutableListOf<MergedMangaReference>()
         try {
-            val db = dbHelper.readableDatabase
-            val cursor = db.rawQuery(
+            val cursor = dbHelper.readableDatabase.rawQuery(
                 "SELECT * FROM merged_manga_reference WHERE merged_id = ? ORDER BY priority DESC",
                 arrayOf(mergedId.toString()),
             )
             if (cursor.moveToFirst()) {
                 do {
-                    val sourceNameIdx = cursor.getColumnIndex("source_name")
+                    val nameIdx = cursor.getColumnIndex("source_name")
                     list.add(
                         MergedMangaReference(
                             id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
@@ -276,8 +289,8 @@ class MergedMangaRepository {
                                 cursor.getColumnIndexOrThrow("is_info_source"),
                             ) == 1,
                             priority = cursor.getInt(cursor.getColumnIndexOrThrow("priority")),
-                            sourceName = if (sourceNameIdx >= 0 && !cursor.isNull(sourceNameIdx)) {
-                                cursor.getString(sourceNameIdx)
+                            sourceName = if (nameIdx >= 0 && !cursor.isNull(nameIdx)) {
+                                cursor.getString(nameIdx)
                             } else {
                                 null
                             },
@@ -322,8 +335,7 @@ class MergedMangaRepository {
     fun getChapters(mergedId: Long): List<MergedChapter> {
         val list = mutableListOf<MergedChapter>()
         try {
-            val db = dbHelper.readableDatabase
-            val cursor = db.rawQuery(
+            val cursor = dbHelper.readableDatabase.rawQuery(
                 "SELECT * FROM merged_chapter WHERE merged_id = ? ORDER BY chapter_number ASC, date_upload ASC",
                 arrayOf(mergedId.toString()),
             )
@@ -353,5 +365,25 @@ class MergedMangaRepository {
 
     fun subscribeToMergedManga(): StateFlow<List<MergedManga>> {
         return mergedFlow.asStateFlow()
+    }
+
+    private fun readMergedManga(cursor: android.database.Cursor): MergedManga {
+        val malIdx = cursor.getColumnIndex("mal_id")
+        return MergedManga(
+            id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
+            title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
+            coverUrl = cursor.getString(cursor.getColumnIndexOrThrow("cover_url")),
+            synopsis = cursor.getString(cursor.getColumnIndexOrThrow("synopsis")),
+            author = cursor.getString(cursor.getColumnIndexOrThrow("author")),
+            artist = cursor.getString(cursor.getColumnIndexOrThrow("artist")),
+            status = cursor.getString(cursor.getColumnIndexOrThrow("status")),
+            genres = cursor.getString(cursor.getColumnIndexOrThrow("genres")),
+            malId = if (malIdx >= 0 && !cursor.isNull(malIdx)) cursor.getLong(malIdx) else null,
+            preferredLanguage = cursor.getString(
+                cursor.getColumnIndexOrThrow("preferred_language"),
+            ) ?: "en",
+            createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
+            updatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("updated_at")),
+        )
     }
 }
