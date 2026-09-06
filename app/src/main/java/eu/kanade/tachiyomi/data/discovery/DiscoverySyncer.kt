@@ -1,69 +1,40 @@
+@file:Suppress("ktlint:standard:max-line-length")
+
 package eu.kanade.tachiyomi.data.discovery
 
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
-object DiscoverySyncer {
+/**
+ * Lightweight helper for creating/updating cohesive DB rows.
+ * Does NOT search extensions (that requires SourceManager via Metro).
+ * Use Cohesive search tab or MergedMangaScreen.relink() for full linking.
+ */
+class DiscoverySyncer {
 
-    private val rssFetcher = RssNewsFetcher()
-    private val rssRepository = RssNewsRepository()
-    private val malFetcher = MalDiscoveryFetcher()
-    private val malRepository = MalDiscoveryRepository()
-    private val mergedMangaManager = MergedMangaManager()
+    private val repository = MergedMangaRepository()
 
-    suspend fun syncNow() {
-        if (DiscoveryProgressState.progress.value.isRunning) return
-
-        DiscoveryProgressState.update(true, 5, "Starting sync...")
-
-        // ===== NEWS =====
-        try {
-            DiscoveryProgressState.update(true, 20, "Fetching news...")
-            withTimeoutOrNull(12000) {
-                val news = rssFetcher.fetchNews(
-                    "https://www.animenewsnetwork.com/news/rss.xml",
-                    "Anime News Network",
-                )
-                if (news.isNotEmpty()) {
-                    rssRepository.insertNews(news)
-                }
-            }
-        } catch (_: Exception) {
-        }
-
-        // ===== SEASONAL MANGA + AUTO LINK =====
-        try {
-            DiscoveryProgressState.update(true, 45, "Fetching seasonal manga...")
-            val mangaList = withTimeoutOrNull(20000) {
-                malFetcher.fetchSeasonalManga()
-            } ?: emptyList()
-
-            if (mangaList.isNotEmpty()) {
-                DiscoveryProgressState.update(true, 65, "Saving seasonal manga...")
-                malRepository.insertSeasonalManga(mangaList)
-
-                // Auto-link to cohesive entries
-                DiscoveryProgressState.update(true, 80, "Creating cohesive entries...")
-                // Limit to avoid very long sync
-                mangaList.take(10).forEach { manga ->
-                    try {
-                        withTimeoutOrNull(10000) {
-                            mergedMangaManager.createOrUpdateMergedManga(
-                                title = manga.title,
-                                coverUrl = manga.coverUrl,
-                                synopsis = manga.synopsis,
-                                malId = manga.malId,
-                            )
-                        }
-                    } catch (_: Exception) {
-                    }
-                }
-            }
-        } catch (_: Exception) {
-        }
-
-        DiscoveryProgressState.update(true, 100, "Done!")
-        delay(1200)
-        DiscoveryProgressState.reset()
+    suspend fun linkTitleToMerged(
+        title: String,
+        coverUrl: String? = null,
+        synopsis: String? = null,
+        author: String? = null,
+        malId: Long? = null,
+    ): Long = withContext(Dispatchers.IO) {
+        repository.createOrUpdateMergedManga(
+            title = title,
+            coverUrl = coverUrl,
+            synopsis = synopsis,
+            author = author,
+            malId = malId,
+        )
     }
-}
+
+    fun getMerged(id: Long): MergedManga? {
+        return repository.getMergedMangaById(id)
+    }
+
+    fun getReferences(mergedId: Long): List<MergedMangaReference> {
+        return repository.getReferences(mergedId)
+    }
+}a
