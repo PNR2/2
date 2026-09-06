@@ -35,6 +35,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
@@ -44,7 +45,7 @@ import coil3.compose.AsyncImage
 import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import eu.kanade.tachiyomi.data.discovery.MergedChapter
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
-import eu.kanade.tachiyomi.ui.manga.MangaScreen
+import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import kotlinx.coroutines.flow.collectLatest
 
 data class MergedMangaScreen(
@@ -55,6 +56,7 @@ data class MergedMangaScreen(
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
+        val context = LocalContext.current
 
         val viewModel = assistedMetroViewModel<MergedMangaViewModel, MergedMangaViewModel.Factory> {
             create(mergedId = mergedId)
@@ -67,8 +69,13 @@ data class MergedMangaScreen(
         val title = manga?.title ?: "..."
 
         LaunchedEffect(viewModel) {
-            viewModel.openManga.collectLatest { mangaId ->
-                navigator.push(MangaScreen(mangaId = mangaId, fromSource = true))
+            viewModel.openReader.collectLatest { open ->
+                val intent = ReaderActivity.newIntent(
+                    context,
+                    open.mangaId,
+                    open.chapterId,
+                )
+                context.startActivity(intent)
             }
         }
 
