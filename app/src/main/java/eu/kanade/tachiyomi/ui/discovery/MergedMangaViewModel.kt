@@ -89,7 +89,7 @@ class MergedMangaViewModel(
         val manga = _state.value.manga ?: return
         if (_state.value.isRelinking) return
         _state.update {
-            it.copy(isRelinking = true, statusText = "Searching extensions...")
+            it.copy(isRelinking = true, statusText = "Searching all extensions…")
         }
         viewModelScope.launch {
             try {
@@ -128,21 +128,21 @@ class MergedMangaViewModel(
         _state.update {
             it.copy(
                 isFetchingChapters = true,
-                statusText = "Fetching chapters from ${it.references.size} sources...",
+                statusText = "Fetching chapters from ${it.references.size} sources…",
             )
         }
 
         viewModelScope.launch {
             try {
-                val allChapters = withContext(Dispatchers.IO) {
+                val fetched = withContext(Dispatchers.IO) {
                     fetchChaptersFromSources(
                         references = current.references,
                         mergedId = mergedId,
                     )
                 }
-                repository.addChapters(allChapters)
+                repository.addChapters(fetched)
                 current.references.forEach { ref ->
-                    val count = allChapters.count { it.sourceId == ref.sourceId }
+                    val count = fetched.count { it.sourceId == ref.sourceId }
                     if (count > 0) {
                         repository.updateReferenceChapterCount(
                             mergedId = mergedId,
@@ -179,7 +179,7 @@ class MergedMangaViewModel(
     fun openChapter(mergedChapter: MergedChapter) {
         viewModelScope.launch {
             try {
-                _state.update { it.copy(statusText = "Opening reader...") }
+                _state.update { it.copy(statusText = "Opening reader…") }
 
                 val ref = _state.value.references.find { it.sourceId == mergedChapter.sourceId }
                     ?: run {
@@ -207,7 +207,7 @@ class MergedMangaViewModel(
                 val reader = withContext(Dispatchers.IO) {
                     val localManga = networkToLocalManga(sManga.toDomainManga(source.id))
 
-                    val remoteChapters: List<SChapter> = withTimeoutOrNull(25000) {
+                    val remoteChapters: List<SChapter> = withTimeoutOrNull(25_000) {
                         val update = source.getMangaUpdate(
                             manga = sManga,
                             chapters = emptyList(),
@@ -265,10 +265,10 @@ class MergedMangaViewModel(
 
         dbChapters.find { it.url == merged.url }?.let { return it }
 
-        val mergedUrlTail = merged.url.substringAfterLast('/')
-        if (mergedUrlTail.isNotBlank()) {
+        val tail = merged.url.substringAfterLast('/')
+        if (tail.isNotBlank()) {
             dbChapters.find {
-                it.url.endsWith(mergedUrlTail) || it.url.contains(mergedUrlTail)
+                it.url.endsWith(tail) || it.url.contains(tail)
             }?.let { return it }
         }
 
@@ -295,10 +295,10 @@ class MergedMangaViewModel(
             it.name.equals(merged.name, ignoreCase = true)
         }?.let { return it }
 
-        val cleanMerged = merged.name.lowercase().trim()
+        val clean = merged.name.lowercase().trim()
         dbChapters.find {
             val n = it.name.lowercase().trim()
-            n == cleanMerged || n.contains(cleanMerged) || cleanMerged.contains(n)
+            n == clean || n.contains(clean) || clean.contains(n)
         }?.let { return it }
 
         return null
@@ -308,7 +308,7 @@ class MergedMangaViewModel(
         references: List<MergedMangaReference>,
         mergedId: Long,
     ): List<MergedChapter> = coroutineScope {
-        val deferredList = references.map { ref ->
+        val deferred = references.map { ref ->
             async {
                 try {
                     val source: Source = sourceManager.get(ref.sourceId)
@@ -319,7 +319,7 @@ class MergedMangaViewModel(
                         title = ref.mangaTitle ?: ""
                     }
 
-                    val chapterList: List<SChapter> = withTimeoutOrNull(20000) {
+                    val chapterList: List<SChapter> = withTimeoutOrNull(20_000) {
                         val update = source.getMangaUpdate(
                             manga = sManga,
                             chapters = emptyList(),
@@ -329,7 +329,7 @@ class MergedMangaViewModel(
                         update.chapters
                     } ?: return@async emptyList<MergedChapter>()
 
-                    chapterList.map { ch: SChapter ->
+                    chapterList.map { ch ->
                         MergedChapter(
                             mergedId = mergedId,
                             sourceId = ref.sourceId,
@@ -346,7 +346,7 @@ class MergedMangaViewModel(
             }
         }
 
-        deferredList.awaitAll()
+        deferred.awaitAll()
             .flatten()
             .distinctBy { it.sourceId.toString() + "_" + it.url }
     }
@@ -440,11 +440,7 @@ class MergedMangaViewModel(
 
         val grouped = languageFiltered.groupBy { ch ->
             val n = effectiveNumber(ch)
-            if (n >= 0f) {
-                "n:" + n
-            } else {
-                "t:" + ch.name.trim().lowercase()
-            }
+            if (n >= 0f) "n:$n" else "t:" + ch.name.trim().lowercase()
         }
 
         val unique = grouped.values.map { group ->
