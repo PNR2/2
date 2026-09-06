@@ -5,6 +5,7 @@ package eu.kanade.tachiyomi.data.discovery
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -17,18 +18,12 @@ import tachiyomi.domain.source.service.SourceManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.Locale
-import kotlin.math.max
-import kotlin.math.min
 
 class MergedMangaManager {
 
     private val repository = MergedMangaRepository()
     private val sourceManager: SourceManager = Injekt.get()
 
-    /**
-     * Search ALL catalogue sources, link best matches, avoid duplicates.
-     * Returns merged manga id.
-     */
     suspend fun createOrUpdateMergedManga(
         title: String,
         coverUrl: String? = null,
@@ -40,11 +35,10 @@ class MergedMangaManager {
         val hits = searchAllSources(queries)
 
         val ranked = hits
-            .map { it.copy(score = scoreMatch(title, it.manga, it.sourceName)) }
+            .map { hit -> hit.copy(score = scoreMatch(title, hit.manga)) }
             .filter { it.score >= MIN_SCORE }
             .sortedByDescending { it.score }
 
-        // Prefer diversity: best hit per source, then fill top overall
         val bySource = ranked
             .groupBy { it.sourceId }
             .mapValues { (_, list) -> list.maxByOrNull { it.score }!! }
@@ -53,14 +47,15 @@ class MergedMangaManager {
 
         val selected = LinkedHashSet<SourceHit>()
         bySource.take(MAX_SOURCES).forEach { selected.add(it) }
-        ranked.take(MAX_SOURCES * 2).forEach {
+        ranked.forEach {
             if (selected.size >= MAX_SOURCES) return@forEach
             selected.add(it)
         }
 
         val bestCover = selected.mapNotNull { it.manga.thumbnail_url }.firstOrNull()
-        val bestAuthor = selected.mapNotNull { it.manga.author }.firstOrNull { it.isNotBlank() }
-        val bestSynopsis = selected.mapNotNull { it.manga.description }.firstOrNull { it.isNotBlank() }
+        val bestAuthor = selected.mapNotNull { it.manga.author }.firstOrNull { !it.isNullOrBlank() }
+        val bestSynopsis = selected.mapNotNull { it.manga.description }
+            .firstOrNull { !it.isNullOrBlank() }
 
         val mergedId = repository.createOrUpdateMergedManga(
             title = title.trim(),
@@ -70,7 +65,6 @@ class MergedMangaManager {
             malId = malId,
         )
 
-        // Replace references with fresh search results
         repository.clearReferences(mergedId)
 
         selected.forEachIndexed { index, hit ->
@@ -107,13 +101,12 @@ class MergedMangaManager {
     }
 
     private suspend fun searchAllSources(queries: List<String>): List<SourceHit> = coroutineScope {
-        val sources = sourceManager.getCatalogueSources()
+        val sources: List<CatalogueSource> = sourceManager.getOnlineSources()
             .filterIsInstance<CatalogueSource>()
             .filter { it.lang.isNotBlank() }
 
         if (sources.isEmpty() || queries.isEmpty()) return@coroutineScope emptyList()
 
-        // Limit parallel network calls so we do not kill the device / rate-limit
         val semaphore = Semaphore(permits = 8)
 
         sources.map { source ->
@@ -129,7 +122,7 @@ class MergedMangaManager {
         source: CatalogueSource,
         queries: List<String>,
     ): List<SourceHit> {
-        val found = LinkedHashMap<String, SourceHit>() // key = manga.url
+        val found = LinkedHashMap<String, SourceHit>()
 
         for (query in queries) {
             try {
@@ -144,22 +137,20 @@ class MergedMangaManager {
                             sourceId = source.id,
                             sourceName = source.name,
                             manga = manga,
-                            score = 0, // scored later
+                            score = 0,
                         )
                     }
                 }
 
-                // Enough results from this source
                 if (found.size >= 8) break
             } catch (_: Exception) {
-                // Source down / blocked — skip
             }
         }
 
         return found.values.toList()
     }
 
-    private fun scoreMatch(userTitle: String, manga: SManga, sourceName: String): Int {
+    private fun scoreMatch(userTitle: String, manga: SManga): Int {
         val user = normalizeTitle(userTitle)
         val candidate = normalizeTitle(manga.title)
         if (user.isEmpty() || candidate.isEmpty()) return 0
@@ -175,7 +166,6 @@ class MergedMangaManager {
             }
         }
 
-        // Core title without author / tags
         val userCore = extractCoreTitle(userTitle)
         val candCore = extractCoreTitle(manga.title)
         if (userCore.length >= 4 && candCore.length >= 4) {
@@ -185,13 +175,11 @@ class MergedMangaManager {
             }
         }
 
-        // Author boost
         val author = manga.author?.let { normalizeTitle(it) }.orEmpty()
-        if (author.isNotEmpty() && normalizeTitle(userTitle).contains(author)) {
+        if (author.isNotEmpty() && user.contains(author)) {
             score += 10
         }
 
-        // Light penalty for very noisy titles vs short query
         if (candidate.length > user.length * 3 && score < 90) {
             score -= 5
         }
@@ -218,7 +206,6 @@ class MergedMangaManager {
 
     private fun stripBrackets(input: String): String {
         var s = input
-        // [English], (Chinese), 【】 etc.
         s = s.replace(Regex("\\[[^\\]]*\\]"), " ")
         s = s.replace(Regex("\\([^)]*\\)"), " ")
         s = s.replace(Regex("【[^】]*】"), " ")
@@ -228,10 +215,8 @@ class MergedMangaManager {
 
     private fun extractCoreTitle(input: String): String {
         var s = stripBrackets(input)
-        // Remove common "Author - Title" or "[Author] Title"
         s = s.replace(Regex("^[^\\-–|]+[\\-–|]\\s*"), "")
         s = normalizeTitle(s)
-        // Drop very short noise tokens
         val tokens = s.split(' ').filter { it.length > 2 }
         return tokens.joinToString(" ").ifBlank { normalizeTitle(input) }
     }
