@@ -66,7 +66,7 @@ data class MergedMangaScreen(
         val manga = state.manga
         val coverUrl = manga?.coverUrl
         val synopsis = manga?.synopsis
-        val title = manga?.title ?: "..."
+        val title = manga?.title ?: "…"
 
         LaunchedEffect(viewModel) {
             viewModel.openReader.collectLatest { open ->
@@ -133,7 +133,7 @@ data class MergedMangaScreen(
                         enabled = !state.isRelinking && !state.isFetchingChapters && manga != null,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (state.isRelinking) "Linking..." else "Re-link sources")
+                        Text(if (state.isRelinking) "Linking…" else "Re-link sources")
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -147,7 +147,7 @@ data class MergedMangaScreen(
                     ) {
                         Text(
                             if (state.isFetchingChapters) {
-                                "Fetching chapters..."
+                                "Fetching chapters…"
                             } else {
                                 "Fetch chapters"
                             },
