@@ -45,7 +45,6 @@ import coil3.compose.AsyncImage
 import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import eu.kanade.tachiyomi.data.discovery.MergedChapter
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
-import eu.kanade.tachiyomi.ui.manga.MangaScreen
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import kotlinx.coroutines.flow.collectLatest
 
@@ -77,12 +76,6 @@ data class MergedMangaScreen(
                     open.chapterId,
                 )
                 context.startActivity(intent)
-            }
-        }
-
-        LaunchedEffect(viewModel) {
-            viewModel.openManga.collectLatest { mangaId ->
-                navigator.push(MangaScreen(mangaId = mangaId, fromSource = true))
             }
         }
 
@@ -223,7 +216,11 @@ data class MergedMangaScreen(
                             val filters = buildList {
                                 add("en")
                                 add("all")
-                                addAll(state.availableLanguages.filter { it != "en" && it != "all" })
+                                addAll(
+                                    state.availableLanguages.filter {
+                                        it != "en" && it != "all"
+                                    },
+                                )
                             }.distinct()
 
                             filters.forEach { lang ->
