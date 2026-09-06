@@ -98,9 +98,6 @@ class MergedMangaRepository {
         }
     }
 
-    /**
-     * Primary API used by Manager + CohesiveSearchViewModel
-     */
     fun createOrUpdateMergedManga(
         title: String,
         coverUrl: String? = null,
@@ -148,12 +145,7 @@ class MergedMangaRepository {
         }
 
         val id = if (existingId != null) {
-            db.update(
-                "merged_manga",
-                values,
-                "id = ?",
-                arrayOf(existingId.toString()),
-            )
+            db.update("merged_manga", values, "id = ?", arrayOf(existingId.toString()))
             existingId
         } else {
             values.put("created_at", now)
@@ -164,7 +156,6 @@ class MergedMangaRepository {
         return id
     }
 
-    /** Convenience overload */
     fun createOrUpdateMergedManga(manga: MergedManga): Long {
         return createOrUpdateMergedManga(
             title = manga.title,
@@ -192,7 +183,6 @@ class MergedMangaRepository {
 
     fun addReference(ref: MergedMangaReference) {
         try {
-            val db = dbHelper.writableDatabase
             val values = ContentValues().apply {
                 put("merged_id", ref.mergedId)
                 put("source_id", ref.sourceId)
@@ -203,7 +193,7 @@ class MergedMangaRepository {
                 put("priority", ref.priority)
                 put("source_name", ref.sourceName)
             }
-            db.insertWithOnConflict(
+            dbHelper.writableDatabase.insertWithOnConflict(
                 "merged_manga_reference",
                 null,
                 values,
@@ -211,7 +201,6 @@ class MergedMangaRepository {
             )
         } catch (_: Exception) {
             try {
-                val db = dbHelper.writableDatabase
                 val values = ContentValues().apply {
                     put("merged_id", ref.mergedId)
                     put("source_id", ref.sourceId)
@@ -221,7 +210,7 @@ class MergedMangaRepository {
                     put("is_info_source", if (ref.isInfoSource) 1 else 0)
                     put("priority", ref.priority)
                 }
-                db.insertWithOnConflict(
+                dbHelper.writableDatabase.insertWithOnConflict(
                     "merged_manga_reference",
                     null,
                     values,
