@@ -61,7 +61,6 @@ class CohesiveSearchViewModel(
             }
             return
         }
-        // Debounce — wait until user finishes typing
         searchJob = viewModelScope.launch {
             delay(650)
             search(query)
@@ -83,9 +82,7 @@ class CohesiveSearchViewModel(
             }
             try {
                 val mergedId = withContext(Dispatchers.IO) {
-                    manager.createOrUpdateMergedManga(
-                        title = q,
-                    )
+                    manager.createOrUpdateMergedManga(title = q)
                 }
                 val manga = withContext(Dispatchers.IO) {
                     repository.getMergedMangaById(mergedId)
