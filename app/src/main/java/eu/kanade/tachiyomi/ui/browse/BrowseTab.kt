@@ -1,32 +1,32 @@
-@file:Suppress("ktlint:standard:max-line-length")
-
 package eu.kanade.tachiyomi.ui.browse
 
 import androidx.compose.animation.graphics.res.animatedVectorResource
 import androidx.compose.animation.graphics.res.rememberAnimatedVectorPainter
 import androidx.compose.animation.graphics.vector.AnimatedImageVector
-import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import cafe.adriel.voyager.navigator.Navigator
+import cafe.adriel.voyager.navigator.tab.LocalTabNavigator
 import cafe.adriel.voyager.navigator.tab.TabOptions
-import eu.kanade.presentation.components.AppBar
+import dev.zacsweers.metrox.viewmodel.metroViewModel
 import eu.kanade.presentation.components.TabbedScreen
 import eu.kanade.presentation.util.Tab
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.ui.browse.cohesive.cohesiveTab
-import eu.kanade.tachiyomi.ui.browse.extension.ExtensionsTab
-import eu.kanade.tachiyomi.ui.browse.migration.sources.MigrateSourceTab
-import eu.kanade.tachiyomi.ui.browse.source.SourcesTab
+import eu.kanade.tachiyomi.ui.browse.extension.ExtensionsViewModel
+import eu.kanade.tachiyomi.ui.browse.extension.extensionsTab
+import eu.kanade.tachiyomi.ui.browse.migration.sources.migrateSourceTab
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
+import eu.kanade.tachiyomi.ui.browse.source.sourcesTab
 import eu.kanade.tachiyomi.ui.main.MainActivity
-import kotlinx.collections.immutable.persistentListOf
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.receiveAsFlow
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 
@@ -35,7 +35,7 @@ data object BrowseTab : Tab {
     override val options: TabOptions
         @Composable
         get() {
-            val isSelected = LocalNavigator.currentOrThrow.parent?.lastItem is BrowseTab
+            val isSelected = LocalTabNavigator.current.current.key == key
             val image = AnimatedImageVector.animatedVectorResource(R.drawable.anim_browse_enter)
             return TabOptions(
                 index = 3u,
@@ -44,21 +44,29 @@ data object BrowseTab : Tab {
             )
         }
 
+    override suspend fun onReselect(navigator: Navigator) {
+        navigator.push(GlobalSearchScreen())
+    }
+
+    private val switchToExtensionTabChannel = Channel<Unit>(1, BufferOverflow.DROP_OLDEST)
+
+    fun showExtension() {
+        switchToExtensionTabChannel.trySend(Unit)
+    }
+
     @Composable
     override fun Content() {
         val context = LocalContext.current
-        val scope = rememberCoroutineScope()
-        val navigator = LocalNavigator.currentOrThrow
 
-        // Order: Sources | Extensions | Migrate | Cohesive
-        val tabs = remember {
-            persistentListOf(
-                SourcesTab,
-                ExtensionsTab(),
-                MigrateSourceTab,
-                cohesiveTab,
-            )
-        }
+        val extensionsViewModel = metroViewModel<ExtensionsViewModel>()
+        val extensionsSearchQuery by extensionsViewModel.searchQuery.collectAsStateWithLifecycle()
+
+        val tabs = listOf(
+            sourcesTab(),
+            extensionsTab(extensionsViewModel),
+            migrateSourceTab(),
+            cohesiveTab(),
+        )
 
         val state = rememberPagerState { tabs.size }
 
@@ -66,26 +74,17 @@ data object BrowseTab : Tab {
             titleRes = MR.strings.browse,
             tabs = tabs,
             state = state,
-            scrollable = true,
-            actions = {
-                AppBar.Action(
-                    title = stringResource(MR.strings.action_global_search),
-                    icon = R.drawable.ic_search_24dp,
-                    onClick = {
-                        navigator.push(GlobalSearchScreen())
-                    },
-                )
-            },
+            searchQuery = extensionsSearchQuery,
+            onChangeSearchQuery = extensionsViewModel::search,
         )
 
         LaunchedEffect(Unit) {
-            (context as? MainActivity)?.ready = true
+            switchToExtensionTabChannel.receiveAsFlow()
+                .collectLatest { state.scrollToPage(1) }
         }
 
-        // Keep pager in sync when TabbedScreen changes page (if your TabbedScreen
-        // does not own the pager itself, use HorizontalPager instead — see alt below)
-        LaunchedEffect(state.currentPage) {
-            // no-op; state is driven by TabbedScreen
+        LaunchedEffect(Unit) {
+            (context as? MainActivity)?.ready = true
         }
     }
 }
