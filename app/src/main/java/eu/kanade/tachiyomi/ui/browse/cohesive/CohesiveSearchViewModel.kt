@@ -23,14 +23,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import tachiyomi.domain.source.service.SourceManager
 
 @AssistedInject
 class CohesiveSearchViewModel(
     @Assisted private val initialQuery: String = "",
+    private val sourceManager: SourceManager,
 ) : ViewModel() {
 
     private val repository = MergedMangaRepository()
-    private val manager = MergedMangaManager()
+    private val manager = MergedMangaManager(sourceManager)
 
     private val _state = MutableStateFlow(State(query = initialQuery))
     val state: StateFlow<State> = _state.asStateFlow()
