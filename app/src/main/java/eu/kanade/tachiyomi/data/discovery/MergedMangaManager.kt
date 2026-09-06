@@ -14,14 +14,13 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import tachiyomi.domain.source.service.SourceManager
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import java.util.Locale
 
-class MergedMangaManager {
+class MergedMangaManager(
+    private val sourceManager: SourceManager,
+) {
 
     private val repository = MergedMangaRepository()
-    private val sourceManager: SourceManager = Injekt.get()
 
     suspend fun createOrUpdateMergedManga(
         title: String,
