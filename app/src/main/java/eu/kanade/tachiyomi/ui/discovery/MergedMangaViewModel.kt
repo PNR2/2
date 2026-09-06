@@ -51,7 +51,7 @@ class MergedMangaViewModel(
 ) : ViewModel() {
 
     private val repository = MergedMangaRepository()
-    private val manager = MergedMangaManager()
+    private val manager = MergedMangaManager(sourceManager)
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
