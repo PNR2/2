@@ -2,8 +2,6 @@
 
 package eu.kanade.tachiyomi.data.discovery
 
-import android.content.ContentValues
-import android.database.sqlite.SQLiteDatabase
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
@@ -24,7 +22,6 @@ class MergedMangaManager {
 
     private val repository = MergedMangaRepository()
     private val sourceManager: SourceManager = Injekt.get()
-    private val dbHelper = DiscoveryDatabaseHelper(Injekt.get())
 
     suspend fun createOrUpdateMergedManga(
         title: String,
@@ -59,22 +56,18 @@ class MergedMangaManager {
         val bestSynopsis = selected.mapNotNull { it.manga.description }
             .firstOrNull { !it.isNullOrBlank() }
 
-        // Old repository API: single manga object
         val mergedId = repository.createOrUpdateMergedManga(
-            MergedManga(
-                title = title.trim(),
-                coverUrl = coverUrl ?: bestCover,
-                synopsis = synopsis ?: bestSynopsis,
-                author = author ?: bestAuthor,
-                malId = malId,
-            ),
+            title = title.trim(),
+            coverUrl = coverUrl ?: bestCover,
+            synopsis = synopsis ?: bestSynopsis,
+            author = author ?: bestAuthor,
+            malId = malId,
         )
 
-        // Clear old links (repo may not have clearReferences)
-        clearReferencesInternal(mergedId)
+        repository.clearReferences(mergedId)
 
         selected.forEachIndexed { index, hit ->
-            insertReference(
+            repository.addReference(
                 MergedMangaReference(
                     mergedId = mergedId,
                     sourceId = hit.sourceId,
@@ -91,69 +84,12 @@ class MergedMangaManager {
         mergedId
     }
 
-    private fun clearReferencesInternal(mergedId: Long) {
-        try {
-            val db = dbHelper.writableDatabase
-            db.delete(
-                "merged_manga_reference",
-                "merged_id = ?",
-                arrayOf(mergedId.toString()),
-            )
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun insertReference(ref: MergedMangaReference) {
-        try {
-            val db = dbHelper.writableDatabase
-            val values = ContentValues().apply {
-                put("merged_id", ref.mergedId)
-                put("source_id", ref.sourceId)
-                put("manga_url", ref.mangaUrl)
-                put("manga_title", ref.mangaTitle)
-                put("chapter_count", ref.chapterCount)
-                put("is_info_source", if (ref.isInfoSource) 1 else 0)
-                put("priority", ref.priority)
-                put("source_name", ref.sourceName)
-            }
-            db.insertWithOnConflict(
-                "merged_manga_reference",
-                null,
-                values,
-                SQLiteDatabase.CONFLICT_REPLACE,
-            )
-        } catch (_: Exception) {
-            // Fallback if source_name column missing
-            try {
-                val db = dbHelper.writableDatabase
-                val values = ContentValues().apply {
-                    put("merged_id", ref.mergedId)
-                    put("source_id", ref.sourceId)
-                    put("manga_url", ref.mangaUrl)
-                    put("manga_title", ref.mangaTitle)
-                    put("chapter_count", ref.chapterCount)
-                    put("is_info_source", if (ref.isInfoSource) 1 else 0)
-                    put("priority", ref.priority)
-                }
-                db.insertWithOnConflict(
-                    "merged_manga_reference",
-                    null,
-                    values,
-                    SQLiteDatabase.CONFLICT_REPLACE,
-                )
-            } catch (_: Exception) {
-            }
-        }
-    }
-
     private fun buildSearchQueries(raw: String): List<String> {
         val base = raw.trim()
         if (base.isEmpty()) return emptyList()
-
         val cleaned = normalizeTitle(base)
         val noBrackets = stripBrackets(base)
         val core = extractCoreTitle(base)
-
         return listOf(base, cleaned, noBrackets, core)
             .map { it.trim() }
             .filter { it.length >= 3 }
@@ -162,19 +98,16 @@ class MergedMangaManager {
     }
 
     private suspend fun searchAllSources(queries: List<String>): List<SourceHit> = coroutineScope {
-        val sources: List<CatalogueSource> = sourceManager.getOnlineSources()
+        val sources = sourceManager.getOnlineSources()
             .filterIsInstance<CatalogueSource>()
             .filter { it.lang.isNotBlank() }
 
         if (sources.isEmpty() || queries.isEmpty()) return@coroutineScope emptyList()
 
-        val semaphore = Semaphore(permits = 8)
-
+        val semaphore = Semaphore(8)
         sources.map { source ->
             async {
-                semaphore.withPermit {
-                    searchOneSource(source, queries)
-                }
+                semaphore.withPermit { searchOneSource(source, queries) }
             }
         }.awaitAll().flatten()
     }
@@ -184,17 +117,14 @@ class MergedMangaManager {
         queries: List<String>,
     ): List<SourceHit> {
         val found = LinkedHashMap<String, SourceHit>()
-
         for (query in queries) {
             try {
                 val page = withTimeoutOrNull(12_000) {
                     source.getSearchManga(1, query, FilterList())
                 } ?: continue
-
                 page.mangas.forEach { manga ->
-                    val key = manga.url
-                    if (!found.containsKey(key)) {
-                        found[key] = SourceHit(
+                    if (!found.containsKey(manga.url)) {
+                        found[manga.url] = SourceHit(
                             sourceId = source.id,
                             sourceName = source.name,
                             manga = manga,
@@ -202,12 +132,10 @@ class MergedMangaManager {
                         )
                     }
                 }
-
                 if (found.size >= 8) break
             } catch (_: Exception) {
             }
         }
-
         return found.values.toList()
     }
 
@@ -215,18 +143,12 @@ class MergedMangaManager {
         val user = normalizeTitle(userTitle)
         val candidate = normalizeTitle(manga.title)
         if (user.isEmpty() || candidate.isEmpty()) return 0
-
         var score = 0
-
         when {
             user == candidate -> score += 100
             candidate.contains(user) || user.contains(candidate) -> score += 80
-            else -> {
-                val sim = tokenSimilarity(user, candidate)
-                score += (sim * 70).toInt()
-            }
+            else -> score += (tokenSimilarity(user, candidate) * 70).toInt()
         }
-
         val userCore = extractCoreTitle(userTitle)
         val candCore = extractCoreTitle(manga.title)
         if (userCore.length >= 4 && candCore.length >= 4) {
@@ -235,16 +157,9 @@ class MergedMangaManager {
                 candCore.contains(userCore) || userCore.contains(candCore) -> score += 15
             }
         }
-
         val authorNorm = manga.author?.let { normalizeTitle(it) }.orEmpty()
-        if (authorNorm.isNotEmpty() && user.contains(authorNorm)) {
-            score += 10
-        }
-
-        if (candidate.length > user.length * 3 && score < 90) {
-            score -= 5
-        }
-
+        if (authorNorm.isNotEmpty() && user.contains(authorNorm)) score += 10
+        if (candidate.length > user.length * 3 && score < 90) score -= 5
         return score.coerceIn(0, 100)
     }
 
