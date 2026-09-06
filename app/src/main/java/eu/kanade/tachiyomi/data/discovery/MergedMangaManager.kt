@@ -2,10 +2,11 @@
 
 package eu.kanade.tachiyomi.data.discovery
 
+import android.content.ContentValues
+import android.database.sqlite.SQLiteDatabase
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -23,6 +24,7 @@ class MergedMangaManager {
 
     private val repository = MergedMangaRepository()
     private val sourceManager: SourceManager = Injekt.get()
+    private val dbHelper = DiscoveryDatabaseHelper(Injekt.get())
 
     suspend fun createOrUpdateMergedManga(
         title: String,
@@ -57,18 +59,22 @@ class MergedMangaManager {
         val bestSynopsis = selected.mapNotNull { it.manga.description }
             .firstOrNull { !it.isNullOrBlank() }
 
+        // Old repository API: single manga object
         val mergedId = repository.createOrUpdateMergedManga(
-            title = title.trim(),
-            coverUrl = coverUrl ?: bestCover,
-            synopsis = synopsis ?: bestSynopsis,
-            author = author ?: bestAuthor,
-            malId = malId,
+            MergedManga(
+                title = title.trim(),
+                coverUrl = coverUrl ?: bestCover,
+                synopsis = synopsis ?: bestSynopsis,
+                author = author ?: bestAuthor,
+                malId = malId,
+            ),
         )
 
-        repository.clearReferences(mergedId)
+        // Clear old links (repo may not have clearReferences)
+        clearReferencesInternal(mergedId)
 
         selected.forEachIndexed { index, hit ->
-            repository.addReference(
+            insertReference(
                 MergedMangaReference(
                     mergedId = mergedId,
                     sourceId = hit.sourceId,
@@ -83,6 +89,61 @@ class MergedMangaManager {
         }
 
         mergedId
+    }
+
+    private fun clearReferencesInternal(mergedId: Long) {
+        try {
+            val db = dbHelper.writableDatabase
+            db.delete(
+                "merged_manga_reference",
+                "merged_id = ?",
+                arrayOf(mergedId.toString()),
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun insertReference(ref: MergedMangaReference) {
+        try {
+            val db = dbHelper.writableDatabase
+            val values = ContentValues().apply {
+                put("merged_id", ref.mergedId)
+                put("source_id", ref.sourceId)
+                put("manga_url", ref.mangaUrl)
+                put("manga_title", ref.mangaTitle)
+                put("chapter_count", ref.chapterCount)
+                put("is_info_source", if (ref.isInfoSource) 1 else 0)
+                put("priority", ref.priority)
+                put("source_name", ref.sourceName)
+            }
+            db.insertWithOnConflict(
+                "merged_manga_reference",
+                null,
+                values,
+                SQLiteDatabase.CONFLICT_REPLACE,
+            )
+        } catch (_: Exception) {
+            // Fallback if source_name column missing
+            try {
+                val db = dbHelper.writableDatabase
+                val values = ContentValues().apply {
+                    put("merged_id", ref.mergedId)
+                    put("source_id", ref.sourceId)
+                    put("manga_url", ref.mangaUrl)
+                    put("manga_title", ref.mangaTitle)
+                    put("chapter_count", ref.chapterCount)
+                    put("is_info_source", if (ref.isInfoSource) 1 else 0)
+                    put("priority", ref.priority)
+                }
+                db.insertWithOnConflict(
+                    "merged_manga_reference",
+                    null,
+                    values,
+                    SQLiteDatabase.CONFLICT_REPLACE,
+                )
+            } catch (_: Exception) {
+            }
+        }
     }
 
     private fun buildSearchQueries(raw: String): List<String> {
@@ -175,8 +236,8 @@ class MergedMangaManager {
             }
         }
 
-        val author = manga.author?.let { normalizeTitle(it) }.orEmpty()
-        if (author.isNotEmpty() && user.contains(author)) {
+        val authorNorm = manga.author?.let { normalizeTitle(it) }.orEmpty()
+        if (authorNorm.isNotEmpty() && user.contains(authorNorm)) {
             score += 10
         }
 
