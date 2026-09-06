@@ -38,6 +38,7 @@ import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
+import kotlin.math.abs
 
 @AssistedInject
 class MergedMangaViewModel(
@@ -174,9 +175,6 @@ class MergedMangaViewModel(
         }
     }
 
-    /**
-     * Unified read: sync source chapters into DB, resolve chapter, open reader.
-     */
     fun openChapter(mergedChapter: MergedChapter) {
         viewModelScope.launch {
             try {
@@ -238,8 +236,7 @@ class MergedMangaViewModel(
                         val targetNum = effectiveNumber(mergedChapter)
                         if (targetNum >= 0f) {
                             dbChapter = dbChapters.find { ch ->
-                                ch.chapterNumber == targetNum.toDouble() ||
-                                    kotlin.math.abs(ch.chapterNumber - targetNum.toDouble()) < 0.001
+                                abs(ch.chapterNumber - targetNum.toDouble()) < 0.001
                             }
                         }
                     }
@@ -259,7 +256,9 @@ class MergedMangaViewModel(
 
                 if (result == null) {
                     _state.update {
-                        it.copy(statusText = "Chapter not found on source. Try Fetch chapters again.")
+                        it.copy(
+                            statusText = "Chapter not found on source. Try Fetch chapters again.",
+                        )
                     }
                     return@launch
                 }
@@ -340,20 +339,50 @@ class MergedMangaViewModel(
         )
     }
 
+    /** Parse chapter number without Regex (avoids escape issues). */
     private fun effectiveNumber(ch: MergedChapter): Float {
         if (ch.chapterNumber > 0f) return ch.chapterNumber
-        val patterns = listOf(
-            Regex("""(?i)(?:ch(?:apter)?[.]?[ ]*)([0-9]+(?:[.][0-9]+)?)"""),
-            Regex("""(?i)(?:c[.]?[ ]*)([0-9]+(?:[.][0-9]+)?)"""),
-            Regex("""(?i)^([0-9]+(?:[.][0-9]+)?)(?:[ ]|$)"""),
-        )
-        for (p in patterns) {
-            val m = p.find(ch.name)
-            if (m != null) {
-                return m.groupValues[1].toFloatOrNull() ?: continue
+
+        val name = ch.name
+        val lower = name.lowercase()
+        val markers = listOf("chapter", "ch.", "ch ", "c.")
+
+        for (marker in markers) {
+            val idx = lower.indexOf(marker)
+            if (idx >= 0) {
+                var i = idx + marker.length
+                while (i < name.length && (name[i] == '.' || name[i] == ' ' || name[i] == '\t')) {
+                    i++
+                }
+                val num = buildString {
+                    while (i < name.length) {
+                        val c = name[i]
+                        if (c.isDigit() || c == '.') {
+                            append(c)
+                            i++
+                        } else {
+                            break
+                        }
+                    }
+                }
+                num.toFloatOrNull()?.let { return it }
             }
         }
-        return -1f
+
+        var i = 0
+        while (i < name.length && name[i].isWhitespace()) i++
+        val leading = buildString {
+            while (i < name.length) {
+                val c = name[i]
+                if (c.isDigit() || c == '.') {
+                    append(c)
+                    i++
+                } else {
+                    break
+                }
+            }
+        }
+        return leading.toFloatOrNull() ?: -1f
     }
 
     private fun State.withFilteredChapters(): State {
@@ -374,7 +403,11 @@ class MergedMangaViewModel(
 
         val grouped = languageFiltered.groupBy { ch ->
             val n = effectiveNumber(ch)
-            if (n >= 0f) "n:\( n" else "t: \){ch.name.trim().lowercase()}"
+            if (n >= 0f) {
+                "n:" + n
+            } else {
+                "t:" + ch.name.trim().lowercase()
+            }
         }
 
         val unique = grouped.values.map { group ->
