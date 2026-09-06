@@ -35,6 +35,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
+import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
@@ -203,7 +204,7 @@ class MergedMangaViewModel(
                     initialized = true
                 }
 
-                val result = withContext(Dispatchers.IO) {
+                val reader = withContext(Dispatchers.IO) {
                     val localManga = networkToLocalManga(sManga.toDomainManga(source.id))
 
                     val remoteChapters: List<SChapter> = withTimeoutOrNull(25000) {
@@ -229,46 +230,78 @@ class MergedMangaViewModel(
                     }
 
                     val dbChapters = getChaptersByMangaId.await(localManga.id)
+                    val matched = findBestChapter(dbChapters, mergedChapter, remoteChapters)
 
-                    var dbChapter = dbChapters.find { it.url == mergedChapter.url }
-
-                    if (dbChapter == null) {
-                        val targetNum = effectiveNumber(mergedChapter)
-                        if (targetNum >= 0f) {
-                            dbChapter = dbChapters.find { ch ->
-                                abs(ch.chapterNumber - targetNum.toDouble()) < 0.001
-                            }
-                        }
-                    }
-
-                    if (dbChapter == null) {
-                        dbChapter = dbChapters.find {
-                            it.name.equals(mergedChapter.name, ignoreCase = true)
-                        }
-                    }
-
-                    if (dbChapter == null) {
-                        null
+                    if (matched != null) {
+                        OpenReader(mangaId = localManga.id, chapterId = matched.id)
                     } else {
-                        OpenReader(mangaId = localManga.id, chapterId = dbChapter.id)
+                        null
                     }
                 }
 
-                if (result == null) {
+                if (reader == null) {
                     _state.update {
                         it.copy(
-                            statusText = "Chapter not found on source. Try Fetch chapters again.",
+                            statusText = "Could not open chapter. Try Fetch chapters, then again.",
                         )
                     }
                     return@launch
                 }
 
-                _openReader.emit(result)
+                _openReader.emit(reader)
                 _state.update { it.copy(statusText = "") }
             } catch (e: Exception) {
                 _state.update { it.copy(statusText = "Open error: ${e.message}") }
             }
         }
+    }
+
+    private fun findBestChapter(
+        dbChapters: List<Chapter>,
+        merged: MergedChapter,
+        remote: List<SChapter>,
+    ): Chapter? {
+        if (dbChapters.isEmpty()) return null
+
+        dbChapters.find { it.url == merged.url }?.let { return it }
+
+        val mergedUrlTail = merged.url.substringAfterLast('/')
+        if (mergedUrlTail.isNotBlank()) {
+            dbChapters.find {
+                it.url.endsWith(mergedUrlTail) || it.url.contains(mergedUrlTail)
+            }?.let { return it }
+        }
+
+        remote.find { it.url == merged.url }?.let { sc ->
+            dbChapters.find { it.url == sc.url }?.let { return it }
+        }
+
+        val targetNum = effectiveNumber(merged)
+        if (targetNum >= 0f) {
+            val byNum = dbChapters.filter {
+                abs(it.chapterNumber - targetNum.toDouble()) < 0.001
+            }
+            if (byNum.size == 1) return byNum.first()
+            if (byNum.isNotEmpty()) {
+                byNum.find {
+                    it.name.contains(merged.name.take(12), ignoreCase = true) ||
+                        merged.name.contains(it.name.take(12), ignoreCase = true)
+                }?.let { return it }
+                return byNum.first()
+            }
+        }
+
+        dbChapters.find {
+            it.name.equals(merged.name, ignoreCase = true)
+        }?.let { return it }
+
+        val cleanMerged = merged.name.lowercase().trim()
+        dbChapters.find {
+            val n = it.name.lowercase().trim()
+            n == cleanMerged || n.contains(cleanMerged) || cleanMerged.contains(n)
+        }?.let { return it }
+
+        return null
     }
 
     private suspend fun fetchChaptersFromSources(
@@ -339,7 +372,6 @@ class MergedMangaViewModel(
         )
     }
 
-    /** Parse chapter number without Regex (avoids escape issues). */
     private fun effectiveNumber(ch: MergedChapter): Float {
         if (ch.chapterNumber > 0f) return ch.chapterNumber
 
@@ -389,15 +421,20 @@ class MergedMangaViewModel(
         val refPriority = references.associate { it.sourceId to it.priority }
         val refChapterCount = references.associate { it.sourceId to it.chapterCount }
 
-        val languageFiltered = when {
-            languageFilter.equals("all", ignoreCase = true) -> allChapters
-            else -> allChapters.filter { ch ->
-                val lang = ch.language?.lowercase()?.trim().orEmpty()
-                lang == languageFilter.lowercase() ||
-                    (
-                        languageFilter.equals("en", ignoreCase = true) &&
-                            (lang.isEmpty() || lang == "en" || lang == "gb")
-                        )
+        val filter = languageFilter.trim().lowercase()
+        val languageFiltered = when (filter) {
+            "all", "" -> allChapters
+            "en", "eng", "english", "gb" -> {
+                allChapters.filter { ch ->
+                    val lang = ch.language?.lowercase()?.trim().orEmpty()
+                    lang.isEmpty() || lang == "en" || lang == "gb" || lang == "eng"
+                }
+            }
+            else -> {
+                allChapters.filter { ch ->
+                    val lang = ch.language?.lowercase()?.trim().orEmpty()
+                    lang == filter
+                }
             }
         }
 
