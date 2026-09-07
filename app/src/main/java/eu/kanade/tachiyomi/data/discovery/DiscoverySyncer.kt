@@ -5,11 +5,6 @@ package eu.kanade.tachiyomi.data.discovery
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * Lightweight helper for creating/updating cohesive DB rows.
- * Does NOT search extensions (that requires SourceManager via Metro).
- * Use Cohesive search tab or MergedMangaScreen.relink() for full linking.
- */
 class DiscoverySyncer {
 
     private val repository = MergedMangaRepository()
@@ -37,4 +32,4 @@ class DiscoverySyncer {
     fun getReferences(mergedId: Long): List<MergedMangaReference> {
         return repository.getReferences(mergedId)
     }
-}a
+}
