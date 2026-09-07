@@ -8,6 +8,21 @@ import kotlinx.coroutines.withContext
 class DiscoverySyncer {
 
     private val repository = MergedMangaRepository()
+    private val malFetcher = MalDiscoveryFetcher()
+    private val malRepository = MalDiscoveryRepository()
+    private val rssRepository = RssNewsRepository()
+
+    suspend fun syncNow() = withContext(Dispatchers.IO) {
+        try {
+            val seasonal = malFetcher.fetchSeasonalManga()
+            malRepository.insertOrUpdateSeasonal(seasonal)
+        } catch (_: Exception) {
+        }
+        try {
+            rssRepository.refreshFromSources()
+        } catch (_: Exception) {
+        }
+    }
 
     suspend fun linkTitleToMerged(
         title: String,
