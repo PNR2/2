@@ -4,9 +4,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Background / manual sync for Discovery Hub.
- * Only MAL seasonal + RSS. Does NOT search extensions
- * (SourceManager must be injected via Metro; that belongs in Cohesive / Merged UI).
+ * Discovery Hub sync (MAL + RSS only).
+ * Does NOT search extensions — SourceManager is Metro-injected and only used
+ * from CohesiveSearchViewModel / MergedMangaViewModel.
  */
 object DiscoverySyncer {
 
