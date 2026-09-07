@@ -120,21 +120,19 @@ class CohesiveSearchViewModel(
                     0
                 }
 
+                val status = when {
+                    primary == null -> "No result"
+                    refCount == 0 && similarManga.isEmpty() -> "Entry created (no sources)"
+                    similarManga.isNotEmpty() -> "Linked $refCount sources · ${similarManga.size} similar"
+                    else -> "Linked $refCount sources"
+                }
+
                 _state.update {
                     it.copy(
                         isSearching = false,
                         primary = primary,
                         similar = similarManga,
-                        statusText = when {
-                            primary == null -> "No result"
-                            refCount == 0 && similarManga.isEmpty() -> "Entry created (no sources)"
-                            else -> "Linked $refCount sources" +
-                                if (similarManga.isNotEmpty()) {
-                                    " · ${similarManga.size} similar"
-                                } else {
-                                    ""
-                                }
-                        },
+                        statusText = status,
                     )
                 }
             } catch (e: Exception) {
