@@ -1,50 +1,56 @@
-@file:Suppress("ktlint:standard:max-line-length")
-
 package eu.kanade.tachiyomi.data.discovery
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 
-class DiscoverySyncer {
+/**
+ * Background / manual sync for Discovery Hub.
+ * Only MAL seasonal + RSS. Does NOT search extensions
+ * (SourceManager must be injected via Metro; that belongs in Cohesive / Merged UI).
+ */
+object DiscoverySyncer {
 
-    private val repository = MergedMangaRepository()
+    private val rssFetcher = RssNewsFetcher()
+    private val rssRepository = RssNewsRepository()
     private val malFetcher = MalDiscoveryFetcher()
     private val malRepository = MalDiscoveryRepository()
-    private val rssRepository = RssNewsRepository()
 
-    suspend fun syncNow() = withContext(Dispatchers.IO) {
+    suspend fun syncNow() {
+        if (DiscoveryProgressState.progress.value.isRunning) return
+
+        DiscoveryProgressState.update(true, 5, "Starting sync...")
+
+        // ===== NEWS =====
         try {
-            val seasonal = malFetcher.fetchSeasonalManga()
-            malRepository.insertOrUpdateSeasonal(seasonal)
+            DiscoveryProgressState.update(true, 25, "Fetching news...")
+            withTimeoutOrNull(15_000) {
+                val news = rssFetcher.fetchNews(
+                    "https://www.animenewsnetwork.com/news/rss.xml",
+                    "Anime News Network",
+                )
+                if (news.isNotEmpty()) {
+                    rssRepository.insertNews(news)
+                }
+            }
         } catch (_: Exception) {
         }
+
+        // ===== SEASONAL MANGA =====
         try {
-            rssRepository.refreshFromSources()
+            DiscoveryProgressState.update(true, 55, "Fetching seasonal manga...")
+            val mangaList = withTimeoutOrNull(25_000) {
+                malFetcher.fetchSeasonalManga()
+            } ?: emptyList()
+
+            if (mangaList.isNotEmpty()) {
+                DiscoveryProgressState.update(true, 80, "Saving seasonal manga...")
+                malRepository.insertSeasonalManga(mangaList)
+            }
         } catch (_: Exception) {
         }
-    }
 
-    suspend fun linkTitleToMerged(
-        title: String,
-        coverUrl: String? = null,
-        synopsis: String? = null,
-        author: String? = null,
-        malId: Long? = null,
-    ): Long = withContext(Dispatchers.IO) {
-        repository.createOrUpdateMergedManga(
-            title = title,
-            coverUrl = coverUrl,
-            synopsis = synopsis,
-            author = author,
-            malId = malId,
-        )
-    }
-
-    fun getMerged(id: Long): MergedManga? {
-        return repository.getMergedMangaById(id)
-    }
-
-    fun getReferences(mergedId: Long): List<MergedMangaReference> {
-        return repository.getReferences(mergedId)
+        DiscoveryProgressState.update(true, 100, "Done!")
+        delay(1_000)
+        DiscoveryProgressState.reset()
     }
 }
