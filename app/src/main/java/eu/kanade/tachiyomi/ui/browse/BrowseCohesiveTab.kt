@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.text.KeyboardActions
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -114,52 +116,100 @@ private fun CohesiveSearchContent(
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        state.result?.let { manga ->
-            Text(
-                text = "Result",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            MangaCard(
-                manga = manga,
-                onClick = { navigator.push(MergedMangaScreen(mergedId = manga.id)) },
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
-        Text(
-            text = "Saved cohesive entries",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        if (state.saved.isEmpty() && !state.isSearching) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = if (state.query.isBlank()) {
-                        "Search a title to build a cohesive entry"
-                    } else {
-                        "No results yet"
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(140.dp),
-                contentPadding = PaddingValues(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(state.saved, key = { it.id }) { manga ->
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(140.dp),
+            contentPadding = PaddingValues(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            // Primary result
+            state.primary?.let { manga ->
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Text(
+                        text = "Best match",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                item(key = "primary_${manga.id}") {
                     MangaCard(
                         manga = manga,
+                        subtitle = "Cohesive entry",
+                        onClick = {
+                            navigator.push(MergedMangaScreen(mergedId = manga.id))
+                        },
+                    )
+                }
+            }
+
+            // Similar titles
+            if (state.similar.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Column {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Similar Manga Titles",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "Separate series · tap to open, then Re-link / Fetch chapters if needed",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                items(state.similar, key = { "similar_${it.id}" }) { manga ->
+                    MangaCard(
+                        manga = manga,
+                        subtitle = "Similar",
+                        onClick = {
+                            navigator.push(MergedMangaScreen(mergedId = manga.id))
+                        },
+                    )
+                }
+            }
+
+            // Saved list
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Saved cohesive entries",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+
+            if (state.saved.isEmpty() && !state.isSearching && state.primary == null) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = if (state.query.isBlank()) {
+                                "Search a title to build a cohesive entry"
+                            } else {
+                                "No results yet"
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            } else {
+                items(state.saved, key = { "saved_${it.id}" }) { manga ->
+                    MangaCard(
+                        manga = manga,
+                        subtitle = null,
                         onClick = {
                             navigator.push(MergedMangaScreen(mergedId = manga.id))
                         },
@@ -173,6 +223,7 @@ private fun CohesiveSearchContent(
 @Composable
 private fun MangaCard(
     manga: MergedManga,
+    subtitle: String?,
     onClick: () -> Unit,
 ) {
     Card(
@@ -200,6 +251,14 @@ private fun MangaCard(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (!subtitle.isNullOrEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         }
     }
