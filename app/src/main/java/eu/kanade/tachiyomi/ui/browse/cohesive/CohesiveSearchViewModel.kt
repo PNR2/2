@@ -59,7 +59,12 @@ class CohesiveSearchViewModel(
         searchJob?.cancel()
         if (query.isBlank()) {
             _state.update {
-                it.copy(isSearching = false, result = null, statusText = "")
+                it.copy(
+                    isSearching = false,
+                    primary = null,
+                    similar = emptyList(),
+                    statusText = "",
+                )
             }
             return
         }
@@ -79,27 +84,56 @@ class CohesiveSearchViewModel(
                 it.copy(
                     isSearching = true,
                     statusText = "Searching all extensions…",
-                    result = null,
+                    primary = null,
+                    similar = emptyList(),
                 )
             }
             try {
-                val mergedId = withContext(Dispatchers.IO) {
-                    manager.createOrUpdateMergedManga(title = q)
+                val outcome = withContext(Dispatchers.IO) {
+                    manager.searchCohesive(query = q)
                 }
-                val manga = withContext(Dispatchers.IO) {
-                    repository.getMergedMangaById(mergedId)
+
+                val primary = if (outcome.primaryId > 0) {
+                    withContext(Dispatchers.IO) {
+                        repository.getMergedMangaById(outcome.primaryId)
+                    }
+                } else {
+                    null
                 }
-                val refs = withContext(Dispatchers.IO) {
-                    repository.getReferences(mergedId)
+
+                val similarManga = withContext(Dispatchers.IO) {
+                    outcome.similar.mapNotNull { item ->
+                        repository.getMergedMangaById(item.id)
+                            ?: MergedManga(
+                                id = item.id,
+                                title = item.title,
+                                coverUrl = item.coverUrl,
+                            )
+                    }
                 }
+
+                val refCount = if (outcome.primaryId > 0) {
+                    withContext(Dispatchers.IO) {
+                        repository.getReferences(outcome.primaryId).size
+                    }
+                } else {
+                    0
+                }
+
                 _state.update {
                     it.copy(
                         isSearching = false,
-                        result = manga,
-                        statusText = if (refs.isEmpty()) {
-                            "No sources found"
-                        } else {
-                            "Linked ${refs.size} sources"
+                        primary = primary,
+                        similar = similarManga,
+                        statusText = when {
+                            primary == null -> "No result"
+                            refCount == 0 && similarManga.isEmpty() -> "Entry created (no sources)"
+                            else -> "Linked $refCount sources" +
+                                if (similarManga.isNotEmpty()) {
+                                    " · ${similarManga.size} similar"
+                                } else {
+                                    ""
+                                }
                         },
                     )
                 }
@@ -118,7 +152,8 @@ class CohesiveSearchViewModel(
         val query: String = "",
         val isSearching: Boolean = false,
         val statusText: String = "",
-        val result: MergedManga? = null,
+        val primary: MergedManga? = null,
+        val similar: List<MergedManga> = emptyList(),
         val saved: List<MergedManga> = emptyList(),
     )
 
