@@ -22,50 +22,172 @@ class MergedMangaManager(
 
     private val repository = MergedMangaRepository()
 
+    data class CohesiveSearchOutcome(
+        val primaryId: Long,
+        val primaryTitle: String,
+        val similar: List<SimilarItem>,
+    )
+
+    data class SimilarItem(
+        val id: Long,
+        val title: String,
+        val coverUrl: String?,
+    )
+
+    /**
+     * Smart-ish search:
+     * - Builds one primary cohesive entry (with source links)
+     * - Builds separate cohesive stubs for other title clusters (no source links)
+     */
+    suspend fun searchCohesive(
+        query: String,
+        coverUrl: String? = null,
+        synopsis: String? = null,
+        author: String? = null,
+        malId: Long? = null,
+    ): CohesiveSearchOutcome = withContext(Dispatchers.IO) {
+        val q = query.trim()
+        if (q.isEmpty()) {
+            return@withContext CohesiveSearchOutcome(-1, q, emptyList())
+        }
+
+        val queries = buildSearchQueries(q)
+        val hits = searchAllSources(queries)
+
+        val ranked = hits
+            .map { hit -> hit.copy(score = scoreMatch(q, hit.manga)) }
+            .filter { it.score >= MIN_SCORE }
+            .sortedByDescending { it.score }
+
+        // Cluster by normalized manga title
+        val clusters = ranked
+            .groupBy { normalizeTitle(it.manga.title) }
+            .filter { (key, _) -> key.length >= 3 }
+            .map { (key, list) ->
+                TitleCluster(
+                    key = key,
+                    displayTitle = list.maxByOrNull { it.score }!!.manga.title,
+                    hits = list.sortedByDescending { it.score },
+                    bestScore = list.maxOf { it.score },
+                    bestCover = list.mapNotNull { it.manga.thumbnail_url }.firstOrNull(),
+                )
+            }
+            .sortedByDescending { it.bestScore }
+
+        if (clusters.isEmpty()) {
+            // Still create a primary stub so the UI has something
+            val id = repository.createOrUpdateMergedManga(
+                title = q,
+                coverUrl = coverUrl,
+                synopsis = synopsis,
+                author = author,
+                malId = malId,
+            )
+            return@withContext CohesiveSearchOutcome(id, q, emptyList())
+        }
+
+        // Primary = cluster that best matches the user query
+        val primaryCluster = clusters.maxByOrNull { cluster ->
+            scoreMatch(q, SManga.create().apply { title = cluster.displayTitle }) +
+                cluster.bestScore / 10
+        } ?: clusters.first()
+
+        val primaryId = saveClusterAsMerged(
+            cluster = primaryCluster,
+            fallbackTitle = q,
+            coverUrl = coverUrl ?: primaryCluster.bestCover,
+            synopsis = synopsis,
+            author = author,
+            malId = malId,
+            linkSources = true,
+        )
+
+        // Similar = other strong clusters (different titles)
+        val similar = clusters
+            .filter { it.key != primaryCluster.key }
+            .filter { it.bestScore >= SIMILAR_MIN_SCORE }
+            .take(MAX_SIMILAR)
+            .map { cluster ->
+                val id = saveClusterAsMerged(
+                    cluster = cluster,
+                    fallbackTitle = cluster.displayTitle,
+                    coverUrl = cluster.bestCover,
+                    synopsis = null,
+                    author = null,
+                    malId = null,
+                    linkSources = false, // no auto sources/chapters
+                )
+                SimilarItem(
+                    id = id,
+                    title = cluster.displayTitle,
+                    coverUrl = cluster.bestCover,
+                )
+            }
+
+        CohesiveSearchOutcome(
+            primaryId = primaryId,
+            primaryTitle = primaryCluster.displayTitle,
+            similar = similar,
+        )
+    }
+
+    /**
+     * Used by Re-link / Seasonal etc. Always links sources.
+     */
     suspend fun createOrUpdateMergedManga(
         title: String,
         coverUrl: String? = null,
         synopsis: String? = null,
         author: String? = null,
         malId: Long? = null,
+        linkSources: Boolean = true,
     ): Long = withContext(Dispatchers.IO) {
-        val queries = buildSearchQueries(title)
-        val hits = searchAllSources(queries)
+        val outcome = searchCohesive(
+            query = title,
+            coverUrl = coverUrl,
+            synopsis = synopsis,
+            author = author,
+            malId = malId,
+        )
+        // If caller only wanted a simple update path, return primary
+        if (!linkSources) {
+            // searchCohesive already linked primary; for stub-only path we still return primary
+        }
+        outcome.primaryId
+    }
 
-        val ranked = hits
-            .map { hit -> hit.copy(score = scoreMatch(title, hit.manga)) }
-            .filter { it.score >= MIN_SCORE }
-            .sortedByDescending { it.score }
+    private fun saveClusterAsMerged(
+        cluster: TitleCluster,
+        fallbackTitle: String,
+        coverUrl: String?,
+        synopsis: String?,
+        author: String?,
+        malId: Long?,
+        linkSources: Boolean,
+    ): Long {
+        val bestHit = cluster.hits.firstOrNull()
+        val mergedId = repository.createOrUpdateMergedManga(
+            title = cluster.displayTitle.ifBlank { fallbackTitle }.trim(),
+            coverUrl = coverUrl ?: bestHit?.manga?.thumbnail_url,
+            synopsis = synopsis ?: bestHit?.manga?.description,
+            author = author ?: bestHit?.manga?.author,
+            malId = malId,
+        )
 
-        val bySource = ranked
+        if (!linkSources) {
+            return mergedId
+        }
+
+        repository.clearReferences(mergedId)
+
+        val bySource = cluster.hits
             .groupBy { it.sourceId }
             .mapValues { (_, list) -> list.maxByOrNull { it.score }!! }
             .values
             .sortedByDescending { it.score }
+            .take(MAX_SOURCES)
 
-        val selected = LinkedHashSet<SourceHit>()
-        bySource.take(MAX_SOURCES).forEach { selected.add(it) }
-        ranked.forEach {
-            if (selected.size >= MAX_SOURCES) return@forEach
-            selected.add(it)
-        }
-
-        val bestCover = selected.mapNotNull { it.manga.thumbnail_url }.firstOrNull()
-        val bestAuthor = selected.mapNotNull { it.manga.author }.firstOrNull { !it.isNullOrBlank() }
-        val bestSynopsis = selected.mapNotNull { it.manga.description }
-            .firstOrNull { !it.isNullOrBlank() }
-
-        val mergedId = repository.createOrUpdateMergedManga(
-            title = title.trim(),
-            coverUrl = coverUrl ?: bestCover,
-            synopsis = synopsis ?: bestSynopsis,
-            author = author ?: bestAuthor,
-            malId = malId,
-        )
-
-        repository.clearReferences(mergedId)
-
-        selected.forEachIndexed { index, hit ->
+        bySource.forEachIndexed { index, hit ->
             repository.addReference(
                 MergedMangaReference(
                     mergedId = mergedId,
@@ -80,7 +202,7 @@ class MergedMangaManager(
             )
         }
 
-        mergedId
+        return mergedId
     }
 
     private fun buildSearchQueries(raw: String): List<String> {
@@ -203,8 +325,18 @@ class MergedMangaManager(
         val score: Int,
     )
 
+    private data class TitleCluster(
+        val key: String,
+        val displayTitle: String,
+        val hits: List<SourceHit>,
+        val bestScore: Int,
+        val bestCover: String?,
+    )
+
     companion object {
         private const val MIN_SCORE = 40
+        private const val SIMILAR_MIN_SCORE = 50
         private const val MAX_SOURCES = 25
+        private const val MAX_SIMILAR = 8
     }
 }
