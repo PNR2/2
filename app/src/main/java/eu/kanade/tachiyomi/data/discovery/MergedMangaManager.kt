@@ -34,11 +34,6 @@ class MergedMangaManager(
         val coverUrl: String?,
     )
 
-    /**
-     * Smart-ish search:
-     * - Builds one primary cohesive entry (with source links)
-     * - Builds separate cohesive stubs for other title clusters (no source links)
-     */
     suspend fun searchCohesive(
         query: String,
         coverUrl: String? = null,
@@ -55,27 +50,38 @@ class MergedMangaManager(
         val hits = searchAllSources(queries)
 
         val ranked = hits
-            .map { hit -> hit.copy(score = scoreMatch(q, hit.manga)) }
+            .map { hit ->
+                hit.copy(score = scoreMatch(q, hit.manga, hit.sourceName, hit.lang))
+            }
             .filter { it.score >= MIN_SCORE }
             .sortedByDescending { it.score }
 
-        // Cluster by normalized manga title
         val clusters = ranked
             .groupBy { normalizeTitle(it.manga.title) }
             .filter { (key, _) -> key.length >= 3 }
             .map { (key, list) ->
+                val best = list.maxByOrNull { it.score }!!
                 TitleCluster(
                     key = key,
-                    displayTitle = list.maxByOrNull { it.score }!!.manga.title,
+                    displayTitle = best.manga.title,
                     hits = list.sortedByDescending { it.score },
-                    bestScore = list.maxOf { it.score },
-                    bestCover = list.mapNotNull { it.manga.thumbnail_url }.firstOrNull(),
+                    bestScore = best.score,
+                    bestCover = list.mapNotNull { it.manga.thumbnail_url }
+                        .firstOrNull { it.isNotBlank() },
+                    queryScore = scoreMatch(
+                        q,
+                        SManga.create().apply { title = best.manga.title },
+                        best.sourceName,
+                        best.lang,
+                    ),
                 )
             }
-            .sortedByDescending { it.bestScore }
+            .sortedWith(
+                compareByDescending<TitleCluster> { it.queryScore }
+                    .thenByDescending { it.bestScore },
+            )
 
         if (clusters.isEmpty()) {
-            // Still create a primary stub so the UI has something
             val id = repository.createOrUpdateMergedManga(
                 title = q,
                 coverUrl = coverUrl,
@@ -86,11 +92,9 @@ class MergedMangaManager(
             return@withContext CohesiveSearchOutcome(id, q, emptyList())
         }
 
-        // Primary = cluster that best matches the user query
-        val primaryCluster = clusters.maxByOrNull { cluster ->
-            scoreMatch(q, SManga.create().apply { title = cluster.displayTitle }) +
-                cluster.bestScore / 10
-        } ?: clusters.first()
+        // Primary must be a strong match to the user query
+        val primaryCluster = clusters.firstOrNull { it.queryScore >= PRIMARY_MIN_QUERY_SCORE }
+            ?: clusters.first()
 
         val primaryId = saveClusterAsMerged(
             cluster = primaryCluster,
@@ -102,10 +106,12 @@ class MergedMangaManager(
             linkSources = true,
         )
 
-        // Similar = other strong clusters (different titles)
         val similar = clusters
+            .asSequence()
             .filter { it.key != primaryCluster.key }
-            .filter { it.bestScore >= SIMILAR_MIN_SCORE }
+            .filter { it.queryScore >= SIMILAR_MIN_SCORE }
+            // Avoid near-duplicates of the primary title
+            .filter { !isNearDuplicateTitle(primaryCluster.key, it.key) }
             .take(MAX_SIMILAR)
             .map { cluster ->
                 val id = saveClusterAsMerged(
@@ -115,7 +121,7 @@ class MergedMangaManager(
                     synopsis = null,
                     author = null,
                     malId = null,
-                    linkSources = false, // no auto sources/chapters
+                    linkSources = false,
                 )
                 SimilarItem(
                     id = id,
@@ -123,6 +129,7 @@ class MergedMangaManager(
                     coverUrl = cluster.bestCover,
                 )
             }
+            .toList()
 
         CohesiveSearchOutcome(
             primaryId = primaryId,
@@ -131,9 +138,6 @@ class MergedMangaManager(
         )
     }
 
-    /**
-     * Used by Re-link / Seasonal etc. Always links sources.
-     */
     suspend fun createOrUpdateMergedManga(
         title: String,
         coverUrl: String? = null,
@@ -149,10 +153,6 @@ class MergedMangaManager(
             author = author,
             malId = malId,
         )
-        // If caller only wanted a simple update path, return primary
-        if (!linkSources) {
-            // searchCohesive already linked primary; for stub-only path we still return primary
-        }
         outcome.primaryId
     }
 
@@ -166,17 +166,19 @@ class MergedMangaManager(
         linkSources: Boolean,
     ): Long {
         val bestHit = cluster.hits.firstOrNull()
+        val resolvedCover = coverUrl
+            ?: cluster.bestCover
+            ?: bestHit?.manga?.thumbnail_url
+
         val mergedId = repository.createOrUpdateMergedManga(
             title = cluster.displayTitle.ifBlank { fallbackTitle }.trim(),
-            coverUrl = coverUrl ?: bestHit?.manga?.thumbnail_url,
+            coverUrl = resolvedCover,
             synopsis = synopsis ?: bestHit?.manga?.description,
             author = author ?: bestHit?.manga?.author,
             malId = malId,
         )
 
-        if (!linkSources) {
-            return mergedId
-        }
+        if (!linkSources) return mergedId
 
         repository.clearReferences(mergedId)
 
@@ -215,7 +217,7 @@ class MergedMangaManager(
             .map { it.trim() }
             .filter { it.length >= 3 }
             .distinctBy { it.lowercase(Locale.ROOT) }
-            .take(4)
+            .take(3)
     }
 
     private suspend fun searchAllSources(queries: List<String>): List<SourceHit> = coroutineScope {
@@ -225,7 +227,7 @@ class MergedMangaManager(
 
         if (sources.isEmpty() || queries.isEmpty()) return@coroutineScope emptyList()
 
-        val semaphore = Semaphore(8)
+        val semaphore = Semaphore(6)
         sources.map { source ->
             async {
                 semaphore.withPermit { searchOneSource(source, queries) }
@@ -240,48 +242,97 @@ class MergedMangaManager(
         val found = LinkedHashMap<String, SourceHit>()
         for (query in queries) {
             try {
-                val page = withTimeoutOrNull(12_000) {
+                val page = withTimeoutOrNull(10_000) {
                     source.getSearchManga(1, query, FilterList())
                 } ?: continue
-                page.mangas.forEach { manga ->
+                page.mangas.take(5).forEach { manga ->
                     if (!found.containsKey(manga.url)) {
                         found[manga.url] = SourceHit(
                             sourceId = source.id,
                             sourceName = source.name,
+                            lang = source.lang,
                             manga = manga,
                             score = 0,
                         )
                     }
                 }
-                if (found.size >= 8) break
+                if (found.size >= 6) break
             } catch (_: Exception) {
             }
         }
         return found.values.toList()
     }
 
-    private fun scoreMatch(userTitle: String, manga: SManga): Int {
+    private fun scoreMatch(
+        userTitle: String,
+        manga: SManga,
+        sourceName: String,
+        lang: String,
+    ): Int {
         val user = normalizeTitle(userTitle)
         val candidate = normalizeTitle(manga.title)
         if (user.isEmpty() || candidate.isEmpty()) return 0
+
         var score = 0
+
         when {
             user == candidate -> score += 100
-            candidate.contains(user) || user.contains(candidate) -> score += 80
-            else -> score += (tokenSimilarity(user, candidate) * 70).toInt()
+            candidate.startsWith(user) || user.startsWith(candidate) -> score += 90
+            candidate.contains(user) || user.contains(candidate) -> score += 70
+            else -> score += (tokenSimilarity(user, candidate) * 55).toInt()
         }
+
+        val userTokens = user.split(' ').filter { it.length > 1 }
+        val candTokens = candidate.split(' ').filter { it.length > 1 }
+        if (userTokens.isNotEmpty()) {
+            val covered = userTokens.count { ut -> candTokens.any { it == ut || it.startsWith(ut) } }
+            val ratio = covered.toFloat() / userTokens.size
+            score += (ratio * 25).toInt()
+            // Penalize titles that only share a short token (e.g. "man", "eat")
+            if (covered == 1 && userTokens.size >= 2 && userTokens.any { it.length <= 3 }) {
+                score -= 25
+            }
+        }
+
         val userCore = extractCoreTitle(userTitle)
         val candCore = extractCoreTitle(manga.title)
         if (userCore.length >= 4 && candCore.length >= 4) {
             when {
-                userCore == candCore -> score += 25
-                candCore.contains(userCore) || userCore.contains(candCore) -> score += 15
+                userCore == candCore -> score += 20
+                candCore.contains(userCore) || userCore.contains(candCore) -> score += 10
             }
         }
-        val authorNorm = manga.author?.let { normalizeTitle(it) }.orEmpty()
-        if (authorNorm.isNotEmpty() && user.contains(authorNorm)) score += 10
-        if (candidate.length > user.length * 3 && score < 90) score -= 5
+
+        // Prefer English sources for ranking
+        val langNorm = lang.lowercase(Locale.ROOT)
+        when {
+            langNorm == "en" || langNorm == "gb" || langNorm.startsWith("en") -> score += 12
+            langNorm == "ja" || langNorm == "jp" -> score += 2
+            else -> score -= 3
+        }
+
+        // Soft penalty for common adult/noise markers in title
+        val noise = listOf("hentai", "r18", "ntr", "netorare", "cg set", "doujin")
+        if (noise.any { candidate.contains(it) } && !user.contains(noise.first { candidate.contains(it) })) {
+            score -= 35
+        }
+
+        // Length mismatch penalty (very long unrelated titles)
+        if (candidate.length > user.length * 2.5 && score < 95) {
+            score -= 10
+        }
+
         return score.coerceIn(0, 100)
+    }
+
+    private fun isNearDuplicateTitle(a: String, b: String): Boolean {
+        if (a == b) return true
+        if (a.contains(b) || b.contains(a)) {
+            val shorter = minOf(a.length, b.length).toFloat()
+            val longer = maxOf(a.length, b.length).toFloat()
+            if (shorter / longer >= 0.85f) return true
+        }
+        return tokenSimilarity(a, b) >= 0.9f
     }
 
     private fun tokenSimilarity(a: String, b: String): Float {
@@ -321,6 +372,7 @@ class MergedMangaManager(
     private data class SourceHit(
         val sourceId: Long,
         val sourceName: String,
+        val lang: String,
         val manga: SManga,
         val score: Int,
     )
@@ -331,12 +383,14 @@ class MergedMangaManager(
         val hits: List<SourceHit>,
         val bestScore: Int,
         val bestCover: String?,
+        val queryScore: Int,
     )
 
     companion object {
-        private const val MIN_SCORE = 40
-        private const val SIMILAR_MIN_SCORE = 50
+        private const val MIN_SCORE = 45
+        private const val PRIMARY_MIN_QUERY_SCORE = 70
+        private const val SIMILAR_MIN_SCORE = 55
         private const val MAX_SOURCES = 25
-        private const val MAX_SIMILAR = 8
+        private const val MAX_SIMILAR = 6
     }
 }
