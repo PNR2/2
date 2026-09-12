@@ -2,405 +2,575 @@
 
 package eu.kanade.tachiyomi.ui.discovery
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.KeyboardArrowUp
-import androidx.compose.material.icons.outlined.Translate
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.core.screen.Screen
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
-import coil3.compose.AsyncImage
-import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dev.zacsweers.metro.AppScope
+import dev.zacsweers.metro.Assisted
+import dev.zacsweers.metro.AssistedFactory
+import dev.zacsweers.metro.AssistedInject
+import dev.zacsweers.metro.ContributesIntoMap
+import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactory
+import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactoryKey
+import eu.kanade.domain.chapter.interactor.SyncChaptersWithSource
 import eu.kanade.tachiyomi.data.discovery.MergedChapter
-import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
-import eu.kanade.tachiyomi.ui.reader.ReaderActivity
-import kotlinx.coroutines.flow.collectLatest
+import eu.kanade.tachiyomi.data.discovery.MergedManga
+import eu.kanade.tachiyomi.data.discovery.MergedMangaManager
+import eu.kanade.tachiyomi.data.discovery.MergedMangaReference
+import eu.kanade.tachiyomi.data.discovery.MergedMangaRepository
+import eu.kanade.tachiyomi.source.Source
+import eu.kanade.tachiyomi.source.model.SChapter
+import eu.kanade.tachiyomi.source.model.SManga
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
+import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.manga.interactor.NetworkToLocalManga
+import tachiyomi.domain.manga.model.Manga
+import tachiyomi.domain.source.service.SourceManager
+import java.util.Locale
+import kotlin.math.abs
 
-data class MergedMangaScreen(
-    val mergedId: Long,
-) : Screen {
+@AssistedInject
+class MergedMangaViewModel(
+    @Assisted private val mergedId: Long,
+    private val sourceManager: SourceManager,
+    private val networkToLocalManga: NetworkToLocalManga,
+    private val syncChaptersWithSource: SyncChaptersWithSource,
+    private val getChaptersByMangaId: GetChaptersByMangaId,
+) : ViewModel() {
 
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Composable
-    override fun Content() {
-        val navigator = LocalNavigator.currentOrThrow
-        val context = LocalContext.current
+    private val repository = MergedMangaRepository()
+    private val manager = MergedMangaManager(sourceManager)
 
-        val viewModel = assistedMetroViewModel<MergedMangaViewModel, MergedMangaViewModel.Factory> {
-            create(mergedId = mergedId)
+    private val _state = MutableStateFlow(State())
+    val state: StateFlow<State> = _state.asStateFlow()
+
+    private val _openReader = MutableSharedFlow<OpenReader>(extraBufferCapacity = 1)
+    val openReader: SharedFlow<OpenReader> = _openReader.asSharedFlow()
+
+    init {
+        load()
+    }
+
+    private fun load() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val manga = repository.getMergedMangaById(mergedId)
+            val refs = repository.getReferences(mergedId)
+            val chapters = repository.getChapters(mergedId)
+            _state.update {
+                it.copy(
+                    manga = manga,
+                    references = refs,
+                    allChapters = chapters,
+                    isLoading = false,
+                ).withFilteredChapters()
+            }
         }
-        val state by viewModel.state.collectAsState()
+    }
 
-        val manga = state.manga
-        val coverUrl = manga?.coverUrl
-        val synopsis = manga?.synopsis
-        val title = manga?.title ?: "…"
+    fun setLanguageFilter(filter: String) {
+        _state.update {
+            it.copy(languageFilter = filter).withFilteredChapters()
+        }
+    }
 
-        LaunchedEffect(viewModel) {
-            viewModel.openReader.collectLatest { open ->
-                val intent = ReaderActivity.newIntent(
-                    context,
-                    open.mangaId,
-                    open.chapterId,
-                )
-                context.startActivity(intent)
+    fun toggleLanguagePanel() {
+        LanguagePanelState.expanded = !LanguagePanelState.expanded
+        _state.update { it.copy(languagePanelExpanded = LanguagePanelState.expanded) }
+    }
+
+    fun relink() {
+        val manga = _state.value.manga ?: return
+        if (_state.value.isRelinking) return
+        _state.update {
+            it.copy(isRelinking = true, statusText = "Searching all extensions…")
+        }
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    manager.createOrUpdateMergedManga(
+                        title = manga.title,
+                        coverUrl = manga.coverUrl,
+                        synopsis = manga.synopsis,
+                        author = manga.author,
+                        malId = manga.malId,
+                    )
+                }
+                val refs = repository.getReferences(mergedId)
+                _state.update {
+                    it.copy(
+                        isRelinking = false,
+                        references = refs,
+                        statusText = "Done. Sources: ${refs.size}",
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        isRelinking = false,
+                        statusText = "Error: ${e.message}",
+                    )
+                }
+            }
+        }
+    }
+
+    fun fetchChapters() {
+        val current = _state.value
+        if (current.isFetchingChapters || current.references.isEmpty()) return
+
+        _state.update {
+            it.copy(
+                isFetchingChapters = true,
+                statusText = "Fetching chapters from ${it.references.size} sources…",
+            )
+        }
+
+        viewModelScope.launch {
+            try {
+                val fetched = withContext(Dispatchers.IO) {
+                    fetchChaptersFromSources(
+                        references = current.references,
+                        mergedId = mergedId,
+                    )
+                }
+                repository.addChapters(fetched)
+                current.references.forEach { ref ->
+                    val count = fetched.count { it.sourceId == ref.sourceId }
+                    if (count > 0) {
+                        repository.updateReferenceChapterCount(
+                            mergedId = mergedId,
+                            sourceId = ref.sourceId,
+                            mangaUrl = ref.mangaUrl,
+                            count = count,
+                        )
+                    }
+                }
+                val chapters = repository.getChapters(mergedId)
+                val refs = repository.getReferences(mergedId)
+                _state.update {
+                    val next = it.copy(
+                        isFetchingChapters = false,
+                        allChapters = chapters,
+                        references = refs,
+                    ).withFilteredChapters()
+                    next.copy(
+                        statusText = "Fetched ${chapters.size} chapters → " +
+                            "${next.displayChapters.size} unique",
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        isFetchingChapters = false,
+                        statusText = "Error: ${e.message}",
+                    )
+                }
+            }
+        }
+    }
+
+    fun openChapter(mergedChapter: MergedChapter) {
+        viewModelScope.launch {
+            try {
+                _state.update { it.copy(statusText = "Opening reader…") }
+
+                val ref = _state.value.references.find { it.sourceId == mergedChapter.sourceId }
+                    ?: run {
+                        _state.update { it.copy(statusText = "Source not found") }
+                        return@launch
+                    }
+
+                val source = sourceManager.get(mergedChapter.sourceId)
+                    ?: run {
+                        _state.update { it.copy(statusText = "Source not installed") }
+                        return@launch
+                    }
+
+                val title = ref.mangaTitle ?: _state.value.manga?.title ?: ""
+                val sManga = SManga.create().apply {
+                    url = ref.mangaUrl
+                    this.title = title
+                    val cover = _state.value.manga?.coverUrl
+                    if (!cover.isNullOrEmpty()) thumbnail_url = cover
+                    val syn = _state.value.manga?.synopsis
+                    if (!syn.isNullOrEmpty()) description = syn
+                    initialized = true
+                }
+
+                val reader = withContext(Dispatchers.IO) {
+                    val localManga = networkToLocalManga(sManga.toDomainManga(source.id))
+
+                    val remoteChapters: List<SChapter> = withTimeoutOrNull(25_000) {
+                        val update = source.getMangaUpdate(
+                            manga = sManga,
+                            chapters = emptyList(),
+                            fetchDetails = false,
+                            fetchChapters = true,
+                        )
+                        update.chapters
+                    } ?: emptyList()
+
+                    if (remoteChapters.isNotEmpty()) {
+                        try {
+                            syncChaptersWithSource.await(
+                                rawSourceChapters = remoteChapters,
+                                manga = localManga,
+                                source = source,
+                                manualFetch = true,
+                            )
+                        } catch (_: Exception) {
+                        }
+                    }
+
+                    val dbChapters = getChaptersByMangaId.await(localManga.id)
+                    val matched = findBestChapter(dbChapters, mergedChapter, remoteChapters)
+
+                    if (matched != null) {
+                        OpenReader(mangaId = localManga.id, chapterId = matched.id)
+                    } else {
+                        null
+                    }
+                }
+
+                if (reader == null) {
+                    _state.update {
+                        it.copy(
+                            statusText = "Could not open chapter. Try Fetch chapters, then again.",
+                        )
+                    }
+                    return@launch
+                }
+
+                _openReader.emit(reader)
+                _state.update { it.copy(statusText = "") }
+            } catch (e: Exception) {
+                _state.update { it.copy(statusText = "Open error: ${e.message}") }
+            }
+        }
+    }
+
+    private fun findBestChapter(
+        dbChapters: List<Chapter>,
+        merged: MergedChapter,
+        remote: List<SChapter>,
+    ): Chapter? {
+        if (dbChapters.isEmpty()) return null
+
+        dbChapters.find { it.url == merged.url }?.let { return it }
+
+        val tail = merged.url.substringAfterLast('/')
+        if (tail.isNotBlank()) {
+            dbChapters.find {
+                it.url.endsWith(tail) || it.url.contains(tail)
+            }?.let { return it }
+        }
+
+        remote.find { it.url == merged.url }?.let { sc ->
+            dbChapters.find { it.url == sc.url }?.let { return it }
+        }
+
+        val targetNum = chapterNumberOf(merged)
+        if (targetNum >= 0f) {
+            val byNum = dbChapters.filter {
+                abs(it.chapterNumber - targetNum.toDouble()) < 0.001
+            }
+            if (byNum.size == 1) return byNum.first()
+            if (byNum.isNotEmpty()) {
+                byNum.find {
+                    it.name.contains(merged.name.take(12), ignoreCase = true) ||
+                        merged.name.contains(it.name.take(12), ignoreCase = true)
+                }?.let { return it }
+                return byNum.first()
             }
         }
 
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text(title, maxLines = 1) },
-                    navigationIcon = {
-                        IconButton(onClick = { navigator.pop() }) {
-                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+        dbChapters.find {
+            it.name.equals(merged.name, ignoreCase = true)
+        }?.let { return it }
+
+        val clean = merged.name.lowercase().trim()
+        dbChapters.find {
+            val n = it.name.lowercase().trim()
+            n == clean || n.contains(clean) || clean.contains(n)
+        }?.let { return it }
+
+        return null
+    }
+
+    private suspend fun fetchChaptersFromSources(
+        references: List<MergedMangaReference>,
+        mergedId: Long,
+    ): List<MergedChapter> = coroutineScope {
+        val deferred = references.map { ref ->
+            async {
+                try {
+                    val source: Source = sourceManager.get(ref.sourceId)
+                        ?: return@async emptyList<MergedChapter>()
+
+                    val sManga = SManga.create().apply {
+                        url = ref.mangaUrl
+                        title = ref.mangaTitle ?: ""
+                    }
+
+                    val chapterList: List<SChapter> = withTimeoutOrNull(20_000) {
+                        val update = source.getMangaUpdate(
+                            manga = sManga,
+                            chapters = emptyList(),
+                            fetchDetails = false,
+                            fetchChapters = true,
+                        )
+                        update.chapters
+                    } ?: return@async emptyList<MergedChapter>()
+
+                    chapterList.map { ch ->
+                        val detected = detectLanguage(ch.name, source.lang)
+                        MergedChapter(
+                            mergedId = mergedId,
+                            sourceId = ref.sourceId,
+                            url = ch.url,
+                            name = ch.name,
+                            chapterNumber = ch.chapter_number,
+                            language = detected,
+                            dateUpload = ch.date_upload,
+                        )
+                    }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+        }
+
+        deferred.awaitAll()
+            .flatten()
+            .distinctBy { it.sourceId.toString() + "_" + it.url }
+    }
+
+    private fun SManga.toDomainManga(sourceId: Long): Manga {
+        val genreList: List<String>? = this.genre
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?.ifEmpty { null }
+
+        return Manga.create().copy(
+            url = this.url,
+            title = this.title,
+            artist = this.artist,
+            author = this.author,
+            description = this.description,
+            genre = genreList,
+            status = this.status.toLong(),
+            thumbnailUrl = this.thumbnail_url,
+            source = sourceId,
+            initialized = this.initialized,
+        )
+    }
+
+    private fun volumeNumberOf(ch: MergedChapter): Int {
+        val name = ch.name
+        val lower = name.lowercase(Locale.ROOT)
+        val markers = listOf("vol.", "vol ", "volume ", "v.")
+        for (marker in markers) {
+            val idx = lower.indexOf(marker)
+            if (idx >= 0) {
+                var i = idx + marker.length
+                while (i < name.length && (name[i].isWhitespace() || name[i] == '.')) {
+                    i++
+                }
+                val num = buildString {
+                    while (i < name.length && name[i].isDigit()) {
+                        append(name[i])
+                        i++
+                    }
+                }
+                num.toIntOrNull()?.let { return it }
+            }
+        }
+        return -1
+    }
+
+    private fun chapterNumberOf(ch: MergedChapter): Float {
+        if (ch.chapterNumber > 0f) return ch.chapterNumber
+
+        val name = ch.name
+        val lower = name.lowercase(Locale.ROOT)
+        val markers = listOf("chapter", "ch.", "ch ", "c.")
+
+        for (marker in markers) {
+            val idx = lower.indexOf(marker)
+            if (idx >= 0) {
+                var i = idx + marker.length
+                while (i < name.length && (name[i] == '.' || name[i].isWhitespace())) {
+                    i++
+                }
+                val num = buildString {
+                    while (i < name.length) {
+                        val c = name[i]
+                        if (c.isDigit() || c == '.') {
+                            append(c)
+                            i++
+                        } else {
+                            break
                         }
-                    },
-                )
+                    }
+                }
+                num.toFloatOrNull()?.let { return it }
+            }
+        }
+
+        var i = 0
+        while (i < name.length && name[i].isWhitespace()) {
+            i++
+        }
+        val leading = buildString {
+            while (i < name.length) {
+                val c = name[i]
+                if (c.isDigit() || c == '.') {
+                    append(c)
+                    i++
+                } else {
+                    break
+                }
+            }
+        }
+        return leading.toFloatOrNull() ?: -1f
+    }
+
+    private fun detectLanguage(chapterName: String, sourceLang: String?): String {
+        val bracket = Regex("""^\s*\[([a-zA-Z]{2}(?:-[a-zA-Z]{2})?)\]""").find(chapterName)
+        if (bracket != null) {
+            return bracket.groupValues[1].lowercase(Locale.ROOT)
+        }
+        val paren = Regex("""^\s*\(([a-zA-Z]{2}(?:-[a-zA-Z]{2})?)\)""").find(chapterName)
+        if (paren != null) {
+            return paren.groupValues[1].lowercase(Locale.ROOT)
+        }
+        return sourceLang?.lowercase(Locale.ROOT)?.trim().orEmpty()
+    }
+
+    private fun resolvedLang(ch: MergedChapter): String {
+        val fromName = detectLanguage(ch.name, null)
+        if (fromName.isNotEmpty()) return fromName
+        return ch.language?.lowercase(Locale.ROOT)?.trim().orEmpty()
+    }
+
+    private fun State.withFilteredChapters(): State {
+        val refPriority = references.associate { it.sourceId to it.priority }
+        val refChapterCount = references.associate { it.sourceId to it.chapterCount }
+
+        val filter = languageFilter.trim().lowercase(Locale.ROOT)
+        val languageFiltered = when (filter) {
+            "all", "" -> allChapters
+            "en", "eng", "english", "gb" -> {
+                allChapters.filter { ch ->
+                    val lang = resolvedLang(ch)
+                    lang.isEmpty() ||
+                        lang == "en" ||
+                        lang == "gb" ||
+                        lang == "eng" ||
+                        lang.startsWith("en")
+                }
+            }
+            else -> {
+                allChapters.filter { ch ->
+                    val lang = resolvedLang(ch)
+                    lang == filter || lang.startsWith(filter)
+                }
+            }
+        }
+
+        val grouped = languageFiltered.groupBy { ch ->
+            val vol = volumeNumberOf(ch)
+            val num = chapterNumberOf(ch)
+            when {
+                vol >= 0 && num >= 0f -> "v:$vol|n:$num"
+                num >= 0f -> "n:$num"
+                else -> "t:" + ch.name.trim().lowercase(Locale.ROOT)
+            }
+        }
+
+        val unique = grouped.values.map { group ->
+            group.sortedWith(
+                compareByDescending<MergedChapter> { ch ->
+                    val lang = resolvedLang(ch)
+                    when {
+                        lang == "en" || lang == "gb" || lang.isEmpty() || lang.startsWith("en") -> 3
+                        else -> 0
+                    }
+                }.thenByDescending { ch ->
+                    refChapterCount[ch.sourceId] ?: 0
+                }.thenByDescending { ch ->
+                    refPriority[ch.sourceId] ?: 0
+                }.thenByDescending { ch ->
+                    ch.dateUpload
+                },
+            ).first()
+        }.sortedWith(
+            compareBy<MergedChapter> { ch ->
+                val v = volumeNumberOf(ch)
+                if (v < 0) Int.MAX_VALUE else v
+            }.thenBy { ch ->
+                val n = chapterNumberOf(ch)
+                if (n < 0f) Float.MAX_VALUE else n
+            }.thenBy { ch ->
+                ch.name.lowercase(Locale.ROOT)
             },
-        ) { paddingValues ->
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                item {
-                    if (!coverUrl.isNullOrEmpty()) {
-                        AsyncImage(
-                            model = coverUrl,
-                            contentDescription = "Cover",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(240.dp),
-                            contentScale = ContentScale.Crop,
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
+        )
 
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
+        val languages = allChapters
+            .map { resolvedLang(it) }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .sorted()
 
-                    if (!synopsis.isNullOrEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = synopsis,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Button(
-                        onClick = { viewModel.relink() },
-                        enabled = !state.isRelinking && !state.isFetchingChapters && manga != null,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(if (state.isRelinking) "Linking…" else "Re-link sources")
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Button(
-                        onClick = { viewModel.fetchChapters() },
-                        enabled = !state.isFetchingChapters &&
-                            !state.isRelinking &&
-                            state.references.isNotEmpty(),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            if (state.isFetchingChapters) {
-                                "Fetching chapters…"
-                            } else {
-                                "Fetch chapters"
-                            },
-                        )
-                    }
-
-                    if (state.statusText.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = state.statusText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-
-                if (state.allChapters.isNotEmpty()) {
-                    item {
-                        val label = when (state.languageFilter.lowercase()) {
-                            "en", "eng", "english", "gb" -> "English"
-                            "all" -> "All languages"
-                            else -> state.languageFilter.uppercase()
-                        }
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { viewModel.toggleLanguagePanel() }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Translate,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                            Text(
-                                text = "  Language · $label",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Icon(
-                                imageVector = if (state.languagePanelExpanded) {
-                                    Icons.Outlined.KeyboardArrowUp
-                                } else {
-                                    Icons.Outlined.KeyboardArrowDown
-                                },
-                                contentDescription = if (state.languagePanelExpanded) {
-                                    "Collapse"
-                                } else {
-                                    "Expand"
-                                },
-                            )
-                        }
-
-                        if (state.languagePanelExpanded) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                val filters = buildList {
-                                    add("en")
-                                    add("all")
-                                    addAll(
-                                        state.availableLanguages.filter {
-                                            it != "en" && it != "all"
-                                        },
-                                    )
-                                }.distinct()
-
-                                filters.forEach { lang ->
-                                    FilterChip(
-                                        selected = state.languageFilter.equals(
-                                            lang,
-                                            ignoreCase = true,
-                                        ),
-                                        onClick = { viewModel.setLanguageFilter(lang) },
-                                        label = {
-                                            Text(
-                                                when (lang.lowercase()) {
-                                                    "en" -> "English"
-                                                    "all" -> "All"
-                                                    else -> lang.uppercase()
-                                                },
-                                            )
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                item {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Linked Sources (${state.references.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-
-                if (state.references.isEmpty()) {
-                    item {
-                        Text(
-                            text = "No sources linked yet. Tap \"Re-link sources\".",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
-                    items(state.references) { ref ->
-                        SourceCard(
-                            title = ref.mangaTitle ?: "Unknown",
-                            sourceName = ref.sourceName ?: "Source ${ref.sourceId}",
-                            chapterCount = ref.chapterCount,
-                            priority = ref.priority,
-                            onClick = {
-                                navigator.push(
-                                    GlobalSearchScreen(
-                                        searchQuery = ref.mangaTitle ?: title,
-                                    ),
-                                )
-                            },
-                        )
-                    }
-                }
-
-                item {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    val chapterTitle = if (state.allChapters.size != state.displayChapters.size) {
-                        "Chapters (${state.displayChapters.size})  ·  ${state.allChapters.size} raw"
-                    } else {
-                        "Chapters (${state.displayChapters.size})"
-                    }
-                    Text(
-                        text = chapterTitle,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-
-                if (state.displayChapters.isEmpty()) {
-                    item {
-                        Text(
-                            text = if (state.allChapters.isEmpty()) {
-                                "No chapters yet. Tap \"Fetch chapters\"."
-                            } else {
-                                "No chapters for this language. Expand Language and try All."
-                            },
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
-                    items(
-                        items = state.displayChapters,
-                        key = { ch -> ch.sourceId.toString() + "_" + ch.url },
-                    ) { chapter ->
-                        val sourceName = state.references
-                            .find { it.sourceId == chapter.sourceId }
-                            ?.sourceName
-                            ?: "Source ${chapter.sourceId}"
-                        ChapterCard(
-                            chapter = chapter,
-                            sourceName = sourceName,
-                            onClick = { viewModel.openChapter(chapter) },
-                        )
-                    }
-                }
-            }
-        }
+        return copy(
+            displayChapters = unique,
+            availableLanguages = languages,
+            languagePanelExpanded = LanguagePanelState.expanded,
+        )
     }
 
-    @Composable
-    private fun SourceCard(
-        title: String,
-        sourceName: String,
-        chapterCount: Int,
-        priority: Int,
-        onClick: () -> Unit,
-    ) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Medium,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = sourceName,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = if (chapterCount > 0) {
-                        "$chapterCount chapters • score $priority"
-                    } else {
-                        "Match score: $priority"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
+    data class OpenReader(
+        val mangaId: Long,
+        val chapterId: Long,
+    )
 
-    @Composable
-    private fun ChapterCard(
-        chapter: MergedChapter,
-        sourceName: String,
-        onClick: () -> Unit,
-    ) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = chapter.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = buildString {
-                        if (chapter.chapterNumber >= 0) {
-                            append("Ch. ${chapter.chapterNumber}")
-                        }
-                        if (!chapter.language.isNullOrBlank()) {
-                            if (isNotEmpty()) append(" • ")
-                            append(chapter.language)
-                        }
-                        if (isNotEmpty()) append(" • ")
-                        append(sourceName)
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+    data class State(
+        val manga: MergedManga? = null,
+        val references: List<MergedMangaReference> = emptyList(),
+        val allChapters: List<MergedChapter> = emptyList(),
+        val displayChapters: List<MergedChapter> = emptyList(),
+        val availableLanguages: List<String> = emptyList(),
+        val languageFilter: String = "en",
+        val languagePanelExpanded: Boolean = LanguagePanelState.expanded,
+        val isLoading: Boolean = true,
+        val isRelinking: Boolean = false,
+        val isFetchingChapters: Boolean = false,
+        val statusText: String = "",
+    )
+
+    @AssistedFactory
+    @ManualViewModelAssistedFactoryKey
+    @ContributesIntoMap(AppScope::class)
+    interface Factory : ManualViewModelAssistedFactory {
+        fun create(mergedId: Long): MergedMangaViewModel
     }
+}
+
+object LanguagePanelState {
+    @Volatile
+    var expanded: Boolean = false
 }
