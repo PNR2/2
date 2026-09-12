@@ -168,7 +168,6 @@ data class MergedMangaScreen(
                     }
                 }
 
-                // Language row (like synopsis expand) — stays expanded across entries
                 if (state.allChapters.isNotEmpty()) {
                     item {
                         val label = when (state.languageFilter.lowercase()) {
@@ -404,3 +403,4 @@ data class MergedMangaScreen(
             }
         }
     }
+}
