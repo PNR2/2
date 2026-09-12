@@ -39,6 +39,7 @@ import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
+import java.util.Locale
 import kotlin.math.abs
 
 @AssistedInject
@@ -83,6 +84,11 @@ class MergedMangaViewModel(
         _state.update {
             it.copy(languageFilter = filter).withFilteredChapters()
         }
+    }
+
+    fun toggleLanguagePanel() {
+        LanguagePanelState.expanded = !LanguagePanelState.expanded
+        _state.update { it.copy(languagePanelExpanded = LanguagePanelState.expanded) }
     }
 
     fun relink() {
@@ -276,7 +282,7 @@ class MergedMangaViewModel(
             dbChapters.find { it.url == sc.url }?.let { return it }
         }
 
-        val targetNum = effectiveNumber(merged)
+        val targetNum = chapterNumberOf(merged)
         if (targetNum >= 0f) {
             val byNum = dbChapters.filter {
                 abs(it.chapterNumber - targetNum.toDouble()) < 0.001
@@ -330,13 +336,14 @@ class MergedMangaViewModel(
                     } ?: return@async emptyList<MergedChapter>()
 
                     chapterList.map { ch ->
+                        val detected = detectLanguage(ch.name, source.lang)
                         MergedChapter(
                             mergedId = mergedId,
                             sourceId = ref.sourceId,
                             url = ch.url,
                             name = ch.name,
                             chapterNumber = ch.chapter_number,
-                            language = source.lang,
+                            language = detected,
                             dateUpload = ch.date_upload,
                         )
                     }
@@ -372,20 +379,40 @@ class MergedMangaViewModel(
         )
     }
 
-    private fun effectiveNumber(ch: MergedChapter): Float {
+    /** e.g. Vol.15 Ch.002 → 15 */
+    private fun volumeNumberOf(ch: MergedChapter): Int {
+        val name = ch.name
+        val lower = name.lowercase(Locale.ROOT)
+        val markers = listOf("vol.", "vol ", "volume ", "v.")
+        for (marker in markers) {
+            val idx = lower.indexOf(marker)
+            if (idx >= 0) {
+                var i = idx + marker.length
+                while (i < name.length && (name[i].isWhitespace() || name[i] == '.')) i++
+                val num = buildString {
+                    while (i < name.length && name[i].isDigit()) {
+                        append(name[i])
+                        i++
+                    }
+                }
+                num.toIntOrNull()?.let { return it }
+            }
+        }
+        return -1
+    }
+
+    private fun chapterNumberOf(ch: MergedChapter): Float {
         if (ch.chapterNumber > 0f) return ch.chapterNumber
 
         val name = ch.name
-        val lower = name.lowercase()
+        val lower = name.lowercase(Locale.ROOT)
         val markers = listOf("chapter", "ch.", "ch ", "c.")
 
         for (marker in markers) {
             val idx = lower.indexOf(marker)
             if (idx >= 0) {
                 var i = idx + marker.length
-                while (i < name.length && (name[i] == '.' || name[i] == ' ' || name[i] == '\t')) {
-                    i++
-                }
+                while (i < name.length && (name[i] == '.' || name[i].isWhitespace())) i++
                 val num = buildString {
                     while (i < name.length) {
                         val c = name[i]
@@ -417,38 +444,64 @@ class MergedMangaViewModel(
         return leading.toFloatOrNull() ?: -1f
     }
 
+    /** Prefer [en] / [pt-BR] in chapter title over source.lang when present. */
+    private fun detectLanguage(chapterName: String, sourceLang: String?): String {
+        val bracket = Regex("""^\s*\[([a-zA-Z]{2}(?:-[a-zA-Z]{2})?)\]""").find(chapterName)
+        if (bracket != null) {
+            return bracket.groupValues[1].lowercase(Locale.ROOT)
+        }
+        val paren = Regex("""^\s*\(([a-zA-Z]{2}(?:-[a-zA-Z]{2})?)\)""").find(chapterName)
+        if (paren != null) {
+            return paren.groupValues[1].lowercase(Locale.ROOT)
+        }
+        return sourceLang?.lowercase(Locale.ROOT)?.trim().orEmpty()
+    }
+
+    private fun resolvedLang(ch: MergedChapter): String {
+        val fromName = detectLanguage(ch.name, null)
+        if (fromName.isNotEmpty()) return fromName
+        return ch.language?.lowercase(Locale.ROOT)?.trim().orEmpty()
+    }
+
     private fun State.withFilteredChapters(): State {
         val refPriority = references.associate { it.sourceId to it.priority }
         val refChapterCount = references.associate { it.sourceId to it.chapterCount }
 
-        val filter = languageFilter.trim().lowercase()
+        val filter = languageFilter.trim().lowercase(Locale.ROOT)
         val languageFiltered = when (filter) {
             "all", "" -> allChapters
             "en", "eng", "english", "gb" -> {
                 allChapters.filter { ch ->
-                    val lang = ch.language?.lowercase()?.trim().orEmpty()
-                    lang.isEmpty() || lang == "en" || lang == "gb" || lang == "eng"
+                    val lang = resolvedLang(ch)
+                    lang.isEmpty() || lang == "en" || lang == "gb" || lang == "eng" ||
+                        lang.startsWith("en")
                 }
             }
             else -> {
                 allChapters.filter { ch ->
-                    val lang = ch.language?.lowercase()?.trim().orEmpty()
-                    lang == filter
+                    val lang = resolvedLang(ch)
+                    lang == filter || lang.startsWith(filter)
                 }
             }
         }
 
+        // Dedupe by volume+chapter when possible
         val grouped = languageFiltered.groupBy { ch ->
-            val n = effectiveNumber(ch)
-            if (n >= 0f) "n:$n" else "t:" + ch.name.trim().lowercase()
+            val vol = volumeNumberOf(ch)
+            val num = chapterNumberOf(ch)
+            when {
+                vol >= 0 && num >= 0f -> "v:$vol|n:$num"
+                num >= 0f -> "n:$num"
+                else -> "t:" + ch.name.trim().lowercase(Locale.ROOT)
+            }
         }
 
         val unique = grouped.values.map { group ->
             group.sortedWith(
                 compareByDescending<MergedChapter> { ch ->
-                    val lang = ch.language?.lowercase().orEmpty()
+                    val lang = resolvedLang(ch)
                     when {
-                        lang == "en" || lang == "gb" || lang.isEmpty() -> 3
+                        lang == "en" || lang == "gb" || lang.isEmpty() || lang.startsWith("en") -> 3
                         else -> 0
                     }
                 }.thenByDescending { ch ->
@@ -460,12 +513,13 @@ class MergedMangaViewModel(
                 },
             ).first()
         }.sortedWith(
-            compareBy<MergedChapter> { effectiveNumber(it) }
-                .thenBy { it.name.lowercase() },
+            compareBy<MergedChapter> { volumeNumberOf(it).let { v -> if (v < 0) Int.MAX_VALUE else v } }
+                .thenBy { chapterNumberOf(it).let { n -> if (n < 0f) Float.MAX_VALUE else n } }
+                .thenBy { it.name.lowercase(Locale.ROOT) },
         )
 
         val languages = allChapters
-            .mapNotNull { it.language?.lowercase()?.trim() }
+            .map { resolvedLang(it) }
             .filter { it.isNotEmpty() }
             .distinct()
             .sorted()
@@ -473,6 +527,7 @@ class MergedMangaViewModel(
         return copy(
             displayChapters = unique,
             availableLanguages = languages,
+            languagePanelExpanded = LanguagePanelState.expanded,
         )
     }
 
@@ -488,6 +543,7 @@ class MergedMangaViewModel(
         val displayChapters: List<MergedChapter> = emptyList(),
         val availableLanguages: List<String> = emptyList(),
         val languageFilter: String = "en",
+        val languagePanelExpanded: Boolean = LanguagePanelState.expanded,
         val isLoading: Boolean = true,
         val isRelinking: Boolean = false,
         val isFetchingChapters: Boolean = false,
@@ -500,4 +556,10 @@ class MergedMangaViewModel(
     interface Factory : ManualViewModelAssistedFactory {
         fun create(mergedId: Long): MergedMangaViewModel
     }
+}
+
+/** Survives navigation between cohesive entries until user collapses it. */
+object LanguagePanelState {
+    @Volatile
+    var expanded: Boolean = false
 }
