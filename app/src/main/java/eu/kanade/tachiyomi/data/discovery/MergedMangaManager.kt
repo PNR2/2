@@ -10,7 +10,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -75,10 +74,6 @@ class MergedMangaManager(
         ) : SearchEvent()
     }
 
-    /**
-     * Live search: emits progress and a primary entry as soon as a strong match appears.
-     * Work is also tracked so it can finish even if the UI leaves.
-     */
     fun searchCohesiveFlow(
         query: String,
         coverUrl: String? = null,
@@ -93,7 +88,6 @@ class MergedMangaManager(
         }
 
         val key = normalizeTitle(q)
-        // Cancel older run for same title
         runningJobs[key]?.cancel()
 
         val parentJob = SupervisorJob()
@@ -103,7 +97,7 @@ class MergedMangaManager(
             val sources = sourceManager.getOnlineSources()
                 .filterIsInstance<CatalogueSource>()
                 .filter { it.lang.isNotBlank() }
-                .sortedByDescending { isEnglishLang(it.lang) } // English first
+                .sortedByDescending { isEnglishLang(it.lang) }
 
             if (sources.isEmpty()) {
                 val id = repository.createOrUpdateMergedManga(
@@ -149,7 +143,6 @@ class MergedMangaManager(
                     }
                 }
 
-                // Process as each source finishes (more live than awaitAll only)
                 jobs.forEach { deferred ->
                     val (hits, sourceName) = deferred.await()
                     val done = hitMutex.withLock { completed }
@@ -170,7 +163,6 @@ class MergedMangaManager(
 
                     if (scored.isEmpty()) return@forEach
 
-                    // Try to publish primary early
                     if (primaryId <= 0) {
                         val best = scored.maxByOrNull { it.score }!!
                         val qScore = scoreMatch(
@@ -181,7 +173,6 @@ class MergedMangaManager(
                         )
                         val nsfw = isNsfwTitle(best.manga.title) && !isNsfwTitle(q)
                         if (qScore >= PRIMARY_EARLY_SCORE && !nsfw) {
-                            val clusterHits = scored
                             primaryKey = normalizeTitle(best.manga.title)
                             primaryTitle = best.manga.title
                             primaryCover = best.manga.thumbnail_url ?: coverUrl
@@ -193,7 +184,7 @@ class MergedMangaManager(
                                 malId = malId,
                             )
                             repository.clearReferences(primaryId)
-                            addHitsAsReferences(primaryId, clusterHits)
+                            addHitsAsReferences(primaryId, scored)
                             linkedCount = repository.getReferences(primaryId).size
                             emit(
                                 SearchEvent.PrimaryReady(
@@ -205,15 +196,16 @@ class MergedMangaManager(
                             )
                         }
                     } else if (primaryKey != null) {
-                        // Append more sources that match the same primary title cluster
                         val matching = scored.filter {
                             normalizeTitle(it.manga.title) == primaryKey ||
-                                isNearDuplicateTitle(normalizeTitle(it.manga.title), primaryKey!!)
+                                isNearDuplicateTitle(
+                                    normalizeTitle(it.manga.title),
+                                    primaryKey!!,
+                                )
                         }
                         if (matching.isNotEmpty()) {
                             addHitsAsReferences(primaryId, matching, clearFirst = false)
                             linkedCount = repository.getReferences(primaryId).size
-                            // Refresh cover if empty
                             if (primaryCover.isNullOrBlank()) {
                                 primaryCover = matching.mapNotNull { it.manga.thumbnail_url }
                                     .firstOrNull { it.isNotBlank() }
@@ -233,7 +225,6 @@ class MergedMangaManager(
                 }
             }
 
-            // Final clustering from all hits
             val ranked = allHits
                 .map { hit ->
                     hit.copy(score = scoreMatch(q, hit.manga, hit.sourceName, hit.lang))
@@ -305,7 +296,6 @@ class MergedMangaManager(
                     emit(SearchEvent.PrimaryReady(primaryId, q, coverUrl, 0))
                 }
             } else {
-                // Rebuild primary refs once from full cluster for cleanliness
                 val keyOfPrimary = primaryKey ?: normalizeTitle(primaryTitle)
                 val fullPrimary = clusters.firstOrNull { it.key == keyOfPrimary }
                 if (fullPrimary != null) {
@@ -367,7 +357,9 @@ class MergedMangaManager(
     ): CohesiveSearchOutcome {
         var outcome = CohesiveSearchOutcome(-1, query, emptyList())
         searchCohesiveFlow(query, coverUrl, synopsis, author, malId).collect { event ->
-            if (event is SearchEvent.Finished) outcome = event.outcome
+            if (event is SearchEvent.Finished) {
+                outcome = event.outcome
+            }
         }
         return outcome
     }
@@ -388,7 +380,9 @@ class MergedMangaManager(
         hits: List<SourceHit>,
         clearFirst: Boolean = false,
     ) {
-        if (clearFirst) repository.clearReferences(mergedId)
+        if (clearFirst) {
+            repository.clearReferences(mergedId)
+        }
         val existing = repository.getReferences(mergedId)
             .map { "${it.sourceId}_${it.mangaUrl}" }
             .toHashSet()
@@ -398,8 +392,8 @@ class MergedMangaManager(
             .values
             .sortedByDescending { it.score }
             .forEachIndexed { index, hit ->
-                val key = "${hit.sourceId}_${hit.manga.url}"
-                if (key in existing) return@forEachIndexed
+                val refKey = "${hit.sourceId}_${hit.manga.url}"
+                if (refKey in existing) return@forEachIndexed
                 if (existing.size >= MAX_SOURCES) return@forEachIndexed
                 repository.addReference(
                     MergedMangaReference(
@@ -413,7 +407,7 @@ class MergedMangaManager(
                         sourceName = hit.sourceName,
                     ),
                 )
-                existing.add(key)
+                existing.add(refKey)
             }
     }
 
@@ -450,7 +444,6 @@ class MergedMangaManager(
         val base = raw.trim()
         if (base.isEmpty()) return emptyList()
         val cleaned = normalizeTitle(base)
-        // Only 2 variants for speed
         return listOf(base, cleaned)
             .map { it.trim() }
             .filter { it.length >= 2 }
@@ -479,7 +472,7 @@ class MergedMangaManager(
                         )
                     }
                 }
-                if (found.isNotEmpty()) break // one successful query is enough
+                if (found.isNotEmpty()) break
             } catch (_: Exception) {
             }
         }
@@ -525,13 +518,21 @@ class MergedMangaManager(
             }
         }
 
-        if (isEnglishLang(lang)) score += 12
-        else if (lang.lowercase(Locale.ROOT) in listOf("ja", "jp")) score += 2
-        else score -= 3
+        if (isEnglishLang(lang)) {
+            score += 12
+        } else if (lang.lowercase(Locale.ROOT) in listOf("ja", "jp")) {
+            score += 2
+        } else {
+            score -= 3
+        }
 
-        if (isNsfwTitle(candidate) && !isNsfwTitle(user)) score -= 40
+        if (isNsfwTitle(candidate) && !isNsfwTitle(user)) {
+            score -= 40
+        }
 
-        if (candidate.length > user.length * 2.5 && score < 95) score -= 10
+        if (candidate.length > user.length * 2.5 && score < 95) {
+            score -= 10
+        }
 
         return score.coerceIn(0, 100)
     }
@@ -539,8 +540,16 @@ class MergedMangaManager(
     private fun isNsfwTitle(title: String): Boolean {
         val t = title.lowercase(Locale.ROOT)
         val noise = listOf(
-            "hentai", "r18", "r-18", "ntr", "netorare", "cg set", "doujin",
-            "adult", "explicit", "18+",
+            "hentai",
+            "r18",
+            "r-18",
+            "ntr",
+            "netorare",
+            "cg set",
+            "doujin",
+            "adult",
+            "explicit",
+            "18+",
         )
         return noise.any { t.contains(it) }
     }
@@ -623,7 +632,6 @@ class MergedMangaManager(
         private val runningJobs = ConcurrentHashMap<String, Job>()
         private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-        /** Keep a search alive after UI leaves (optional helper). */
         fun ensureBackground(
             manager: MergedMangaManager,
             query: String,
