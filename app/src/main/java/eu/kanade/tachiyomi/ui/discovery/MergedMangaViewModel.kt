@@ -379,7 +379,6 @@ class MergedMangaViewModel(
         )
     }
 
-    /** e.g. Vol.15 Ch.002 → 15 */
     private fun volumeNumberOf(ch: MergedChapter): Int {
         val name = ch.name
         val lower = name.lowercase(Locale.ROOT)
@@ -388,7 +387,9 @@ class MergedMangaViewModel(
             val idx = lower.indexOf(marker)
             if (idx >= 0) {
                 var i = idx + marker.length
-                while (i < name.length && (name[i].isWhitespace() || name[i] == '.')) i++
+                while (i < name.length && (name[i].isWhitespace() || name[i] == '.')) {
+                    i++
+                }
                 val num = buildString {
                     while (i < name.length && name[i].isDigit()) {
                         append(name[i])
@@ -412,7 +413,9 @@ class MergedMangaViewModel(
             val idx = lower.indexOf(marker)
             if (idx >= 0) {
                 var i = idx + marker.length
-                while (i < name.length && (name[i] == '.' || name[i].isWhitespace())) i++
+                while (i < name.length && (name[i] == '.' || name[i].isWhitespace())) {
+                    i++
+                }
                 val num = buildString {
                     while (i < name.length) {
                         val c = name[i]
@@ -429,7 +432,9 @@ class MergedMangaViewModel(
         }
 
         var i = 0
-        while (i < name.length && name[i].isWhitespace()) i++
+        while (i < name.length && name[i].isWhitespace()) {
+            i++
+        }
         val leading = buildString {
             while (i < name.length) {
                 val c = name[i]
@@ -444,7 +449,6 @@ class MergedMangaViewModel(
         return leading.toFloatOrNull() ?: -1f
     }
 
-    /** Prefer [en] / [pt-BR] in chapter title over source.lang when present. */
     private fun detectLanguage(chapterName: String, sourceLang: String?): String {
         val bracket = Regex("""^\s*\[([a-zA-Z]{2}(?:-[a-zA-Z]{2})?)\]""").find(chapterName)
         if (bracket != null) {
@@ -473,7 +477,10 @@ class MergedMangaViewModel(
             "en", "eng", "english", "gb" -> {
                 allChapters.filter { ch ->
                     val lang = resolvedLang(ch)
-                    lang.isEmpty() || lang == "en" || lang == "gb" || lang == "eng" ||
+                    lang.isEmpty() ||
+                        lang == "en" ||
+                        lang == "gb" ||
+                        lang == "eng" ||
                         lang.startsWith("en")
                 }
             }
@@ -485,7 +492,6 @@ class MergedMangaViewModel(
             }
         }
 
-        // Dedupe by volume+chapter when possible
         val grouped = languageFiltered.groupBy { ch ->
             val vol = volumeNumberOf(ch)
             val num = chapterNumberOf(ch)
@@ -513,9 +519,15 @@ class MergedMangaViewModel(
                 },
             ).first()
         }.sortedWith(
-            compareBy<MergedChapter> { volumeNumberOf(it).let { v -> if (v < 0) Int.MAX_VALUE else v } }
-                .thenBy { chapterNumberOf(it).let { n -> if (n < 0f) Float.MAX_VALUE else n } }
-                .thenBy { it.name.lowercase(Locale.ROOT) },
+            compareBy<MergedChapter> { ch ->
+                val v = volumeNumberOf(ch)
+                if (v < 0) Int.MAX_VALUE else v
+            }.thenBy { ch ->
+                val n = chapterNumberOf(ch)
+                if (n < 0f) Float.MAX_VALUE else n
+            }.thenBy { ch ->
+                ch.name.lowercase(Locale.ROOT)
+            },
         )
 
         val languages = allChapters
@@ -558,7 +570,6 @@ class MergedMangaViewModel(
     }
 }
 
-/** Survives navigation between cohesive entries until user collapses it. */
 object LanguagePanelState {
     @Volatile
     var expanded: Boolean = false
