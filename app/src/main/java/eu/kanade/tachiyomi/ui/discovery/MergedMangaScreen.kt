@@ -18,6 +18,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -33,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -164,6 +168,87 @@ data class MergedMangaScreen(
                     }
                 }
 
+                // Language row (like synopsis expand) — stays expanded across entries
+                if (state.allChapters.isNotEmpty()) {
+                    item {
+                        val label = when (state.languageFilter.lowercase()) {
+                            "en", "eng", "english", "gb" -> "English"
+                            "all" -> "All languages"
+                            else -> state.languageFilter.uppercase()
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.toggleLanguagePanel() }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Translate,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                text = "  Language · $label",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Icon(
+                                imageVector = if (state.languagePanelExpanded) {
+                                    Icons.Outlined.KeyboardArrowUp
+                                } else {
+                                    Icons.Outlined.KeyboardArrowDown
+                                },
+                                contentDescription = if (state.languagePanelExpanded) {
+                                    "Collapse"
+                                } else {
+                                    "Expand"
+                                },
+                            )
+                        }
+
+                        if (state.languagePanelExpanded) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                val filters = buildList {
+                                    add("en")
+                                    add("all")
+                                    addAll(
+                                        state.availableLanguages.filter {
+                                            it != "en" && it != "all"
+                                        },
+                                    )
+                                }.distinct()
+
+                                filters.forEach { lang ->
+                                    FilterChip(
+                                        selected = state.languageFilter.equals(
+                                            lang,
+                                            ignoreCase = true,
+                                        ),
+                                        onClick = { viewModel.setLanguageFilter(lang) },
+                                        label = {
+                                            Text(
+                                                when (lang.lowercase()) {
+                                                    "en" -> "English"
+                                                    "all" -> "All"
+                                                    else -> lang.uppercase()
+                                                },
+                                            )
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
@@ -198,50 +283,6 @@ data class MergedMangaScreen(
                     }
                 }
 
-                if (state.allChapters.isNotEmpty()) {
-                    item {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Language",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            val filters = buildList {
-                                add("en")
-                                add("all")
-                                addAll(
-                                    state.availableLanguages.filter {
-                                        it != "en" && it != "all"
-                                    },
-                                )
-                            }.distinct()
-
-                            filters.forEach { lang ->
-                                FilterChip(
-                                    selected = state.languageFilter.equals(lang, ignoreCase = true),
-                                    onClick = { viewModel.setLanguageFilter(lang) },
-                                    label = {
-                                        Text(
-                                            when (lang.lowercase()) {
-                                                "en" -> "English"
-                                                "all" -> "All"
-                                                else -> lang.uppercase()
-                                            },
-                                        )
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
                     val chapterTitle = if (state.allChapters.size != state.displayChapters.size) {
@@ -262,7 +303,7 @@ data class MergedMangaScreen(
                             text = if (state.allChapters.isEmpty()) {
                                 "No chapters yet. Tap \"Fetch chapters\"."
                             } else {
-                                "No chapters for this language. Try \"All\"."
+                                "No chapters for this language. Expand Language and try All."
                             },
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -363,4 +404,3 @@ data class MergedMangaScreen(
             }
         }
     }
-}
