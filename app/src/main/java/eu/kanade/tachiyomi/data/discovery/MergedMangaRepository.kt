@@ -14,6 +14,8 @@ data class MergedManga(
     val id: Long = 0,
     val title: String,
     val coverUrl: String? = null,
+    /** Extra covers, pipe-separated in DB; exposed as list. */
+    val coverUrls: List<String> = emptyList(),
     val synopsis: String? = null,
     val author: String? = null,
     val artist: String? = null,
@@ -23,7 +25,15 @@ data class MergedManga(
     val preferredLanguage: String = "en",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
-)
+) {
+    /** Primary + extras, unique, non-blank — for the cover pager. */
+    fun allCovers(): List<String> {
+        return (listOfNotNull(coverUrl) + coverUrls)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+    }
+}
 
 data class MergedMangaReference(
     val id: Long = 0,
@@ -54,8 +64,21 @@ class MergedMangaRepository {
         private val dbHelper = DiscoveryDatabaseHelper(Injekt.get())
         private val mergedFlow = MutableStateFlow<List<MergedManga>>(emptyList())
 
+        private const val COVER_SEP = "|||"
+
         init {
             refreshFlow()
+        }
+
+        private fun encodeCovers(covers: List<String>?): String? {
+            if (covers.isNullOrEmpty()) return null
+            val cleaned = covers.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+            return if (cleaned.isEmpty()) null else cleaned.joinToString(COVER_SEP)
+        }
+
+        private fun decodeCovers(raw: String?): List<String> {
+            if (raw.isNullOrBlank()) return emptyList()
+            return raw.split(COVER_SEP).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         }
 
         private fun refreshFlow() {
@@ -79,16 +102,26 @@ class MergedMangaRepository {
 
         private fun readMergedManga(cursor: android.database.Cursor): MergedManga {
             val malIdx = cursor.getColumnIndex("mal_id")
+            val coverUrlsIdx = cursor.getColumnIndex("cover_urls")
             return MergedManga(
                 id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
                 title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
                 coverUrl = cursor.getString(cursor.getColumnIndexOrThrow("cover_url")),
+                coverUrls = if (coverUrlsIdx >= 0 && !cursor.isNull(coverUrlsIdx)) {
+                    decodeCovers(cursor.getString(coverUrlsIdx))
+                } else {
+                    emptyList()
+                },
                 synopsis = cursor.getString(cursor.getColumnIndexOrThrow("synopsis")),
                 author = cursor.getString(cursor.getColumnIndexOrThrow("author")),
                 artist = cursor.getString(cursor.getColumnIndexOrThrow("artist")),
                 status = cursor.getString(cursor.getColumnIndexOrThrow("status")),
                 genres = cursor.getString(cursor.getColumnIndexOrThrow("genres")),
-                malId = if (malIdx >= 0 && !cursor.isNull(malIdx)) cursor.getLong(malIdx) else null,
+                malId = if (malIdx >= 0 && !cursor.isNull(malIdx)) {
+                    cursor.getLong(malIdx)
+                } else {
+                    null
+                },
                 preferredLanguage = cursor.getString(
                     cursor.getColumnIndexOrThrow("preferred_language"),
                 ) ?: "en",
@@ -101,6 +134,7 @@ class MergedMangaRepository {
     fun createOrUpdateMergedManga(
         title: String,
         coverUrl: String? = null,
+        coverUrls: List<String>? = null,
         synopsis: String? = null,
         author: String? = null,
         artist: String? = null,
@@ -134,6 +168,7 @@ class MergedMangaRepository {
         val values = ContentValues().apply {
             put("title", cleanTitle)
             put("cover_url", coverUrl)
+            put("cover_urls", encodeCovers(coverUrls))
             put("synopsis", synopsis)
             put("author", author)
             put("artist", artist)
@@ -160,6 +195,7 @@ class MergedMangaRepository {
         return createOrUpdateMergedManga(
             title = manga.title,
             coverUrl = manga.coverUrl,
+            coverUrls = manga.coverUrls,
             synopsis = manga.synopsis,
             author = manga.author,
             artist = manga.artist,
@@ -168,6 +204,24 @@ class MergedMangaRepository {
             malId = manga.malId,
             preferredLanguage = manga.preferredLanguage,
         )
+    }
+
+    fun updateCoverUrls(mergedId: Long, coverUrl: String?, coverUrls: List<String>) {
+        try {
+            val values = ContentValues().apply {
+                put("cover_url", coverUrl)
+                put("cover_urls", encodeCovers(coverUrls))
+                put("updated_at", System.currentTimeMillis())
+            }
+            dbHelper.writableDatabase.update(
+                "merged_manga",
+                values,
+                "id = ?",
+                arrayOf(mergedId.toString()),
+            )
+            refreshFlow()
+        } catch (_: Exception) {
+        }
     }
 
     fun clearReferences(mergedId: Long) {
@@ -272,8 +326,12 @@ class MergedMangaRepository {
                             mergedId = cursor.getLong(cursor.getColumnIndexOrThrow("merged_id")),
                             sourceId = cursor.getLong(cursor.getColumnIndexOrThrow("source_id")),
                             mangaUrl = cursor.getString(cursor.getColumnIndexOrThrow("manga_url")),
-                            mangaTitle = cursor.getString(cursor.getColumnIndexOrThrow("manga_title")),
-                            chapterCount = cursor.getInt(cursor.getColumnIndexOrThrow("chapter_count")),
+                            mangaTitle = cursor.getString(
+                                cursor.getColumnIndexOrThrow("manga_title"),
+                            ),
+                            chapterCount = cursor.getInt(
+                                cursor.getColumnIndexOrThrow("chapter_count"),
+                            ),
                             isInfoSource = cursor.getInt(
                                 cursor.getColumnIndexOrThrow("is_info_source"),
                             ) == 1,
@@ -341,7 +399,9 @@ class MergedMangaRepository {
                                 cursor.getColumnIndexOrThrow("chapter_number"),
                             ),
                             language = cursor.getString(cursor.getColumnIndexOrThrow("language")),
-                            dateUpload = cursor.getLong(cursor.getColumnIndexOrThrow("date_upload")),
+                            dateUpload = cursor.getLong(
+                                cursor.getColumnIndexOrThrow("date_upload"),
+                            ),
                         ),
                     )
                 } while (cursor.moveToNext())
@@ -354,25 +414,5 @@ class MergedMangaRepository {
 
     fun subscribeToMergedManga(): StateFlow<List<MergedManga>> {
         return mergedFlow.asStateFlow()
-    }
-
-    private fun readMergedManga(cursor: android.database.Cursor): MergedManga {
-        val malIdx = cursor.getColumnIndex("mal_id")
-        return MergedManga(
-            id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
-            title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
-            coverUrl = cursor.getString(cursor.getColumnIndexOrThrow("cover_url")),
-            synopsis = cursor.getString(cursor.getColumnIndexOrThrow("synopsis")),
-            author = cursor.getString(cursor.getColumnIndexOrThrow("author")),
-            artist = cursor.getString(cursor.getColumnIndexOrThrow("artist")),
-            status = cursor.getString(cursor.getColumnIndexOrThrow("status")),
-            genres = cursor.getString(cursor.getColumnIndexOrThrow("genres")),
-            malId = if (malIdx >= 0 && !cursor.isNull(malIdx)) cursor.getLong(malIdx) else null,
-            preferredLanguage = cursor.getString(
-                cursor.getColumnIndexOrThrow("preferred_language"),
-            ) ?: "en",
-            createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
-            updatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("updated_at")),
-        )
     }
 }
