@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -69,9 +71,9 @@ data class MergedMangaScreen(
         val state by viewModel.state.collectAsState()
 
         val manga = state.manga
-        val coverUrl = manga?.coverUrl
-        val synopsis = manga?.synopsis
         val title = manga?.title ?: "…"
+        val synopsis = manga?.synopsis
+        val covers = manga?.allCovers().orEmpty()
 
         LaunchedEffect(viewModel) {
             viewModel.openReader.collectLatest { open ->
@@ -90,7 +92,10 @@ data class MergedMangaScreen(
                     title = { Text(title, maxLines = 1) },
                     navigationIcon = {
                         IconButton(onClick = { navigator.pop() }) {
-                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                            Icon(
+                                Icons.AutoMirrored.Outlined.ArrowBack,
+                                contentDescription = "Back",
+                            )
                         }
                     },
                 )
@@ -104,15 +109,30 @@ data class MergedMangaScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item {
-                    if (!coverUrl.isNullOrEmpty()) {
-                        AsyncImage(
-                            model = coverUrl,
-                            contentDescription = "Cover",
+                    // Multi-cover swipe
+                    if (covers.isNotEmpty()) {
+                        val pagerState = rememberPagerState(pageCount = { covers.size })
+                        HorizontalPager(
+                            state = pagerState,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(240.dp),
-                            contentScale = ContentScale.Crop,
-                        )
+                        ) { page ->
+                            AsyncImage(
+                                model = covers[page],
+                                contentDescription = "Cover ${page + 1}",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        }
+                        if (covers.size > 1) {
+                            Text(
+                                text = "Cover ${pagerState.currentPage + 1} / ${covers.size}  ·  swipe",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
                         Spacer(modifier = Modifier.height(12.dp))
                     }
 
@@ -135,7 +155,9 @@ data class MergedMangaScreen(
 
                     Button(
                         onClick = { viewModel.relink() },
-                        enabled = !state.isRelinking && !state.isFetchingChapters && manga != null,
+                        enabled = !state.isRelinking &&
+                            !state.isFetchingChapters &&
+                            manga != null,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(if (state.isRelinking) "Linking…" else "Re-link sources")
@@ -169,7 +191,7 @@ data class MergedMangaScreen(
                     }
                 }
 
-                // Language (collapsible)
+                // Language panel
                 if (state.allChapters.isNotEmpty()) {
                     item {
                         val label = when (state.languageFilter.lowercase()) {
@@ -245,7 +267,7 @@ data class MergedMangaScreen(
                         }
                     }
 
-                    // Paid (collapsible) — Free by default; Paid only when selected
+                    // Paid / Free access panel
                     item {
                         val paidLabel = when (state.paidFilter) {
                             MergedMangaViewModel.PaidFilter.FREE -> "Free"
