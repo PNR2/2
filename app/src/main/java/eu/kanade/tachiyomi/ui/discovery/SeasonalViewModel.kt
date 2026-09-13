@@ -5,7 +5,6 @@ package eu.kanade.tachiyomi.ui.discovery
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.zacsweers.metro.AppScope
-import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
 import dev.zacsweers.metro.ContributesIntoMap
@@ -28,7 +27,6 @@ import tachiyomi.domain.source.service.SourceManager
 
 @AssistedInject
 class SeasonalViewModel(
-    @Assisted private val unused: Unit = Unit,
     private val sourceManager: SourceManager,
 ) : ViewModel() {
 
@@ -42,32 +40,24 @@ class SeasonalViewModel(
     val openMerged: SharedFlow<Long> = _openMerged.asSharedFlow()
 
     init {
-        refreshList()
-    }
-
-    fun refreshList() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val list = try {
-                repository.getSeasonalManga()
-            } catch (_: Exception) {
-                emptyList()
-            }
-            _state.update {
-                it.copy(
-                    items = list,
-                    statusText = if (list.isEmpty()) {
-                        "No seasonal manga yet. Pull refresh in Discovery."
-                    } else {
-                        ""
-                    },
-                )
+        viewModelScope.launch {
+            repository.subscribeToSeasonalManga().collect { list ->
+                _state.update {
+                    it.copy(
+                        items = list,
+                        statusText = if (list.isEmpty() && it.openingMalId == null) {
+                            "No seasonal manga yet. Refresh Discovery."
+                        } else if (it.openingMalId == null) {
+                            ""
+                        } else {
+                            it.statusText
+                        },
+                    )
+                }
             }
         }
     }
 
-    /**
-     * Vision: tap seasonal card → search all extensions in background → open cohesive entry.
-     */
     fun openCohesive(item: MalDiscoveryItem) {
         if (_state.value.openingMalId != null) return
 
@@ -85,17 +75,14 @@ class SeasonalViewModel(
                         title = item.title,
                         coverUrl = item.coverUrl,
                         synopsis = item.synopsis,
-                        author = null,
+                        author = item.authors,
                         malId = item.malId,
                     )
                 }
                 if (mergedId > 0) {
                     _openMerged.emit(mergedId)
                     _state.update {
-                        it.copy(
-                            openingMalId = null,
-                            statusText = "",
-                        )
+                        it.copy(openingMalId = null, statusText = "")
                     }
                 } else {
                     _state.update {
@@ -126,6 +113,6 @@ class SeasonalViewModel(
     @ManualViewModelAssistedFactoryKey
     @ContributesIntoMap(AppScope::class)
     interface Factory : ManualViewModelAssistedFactory {
-        fun create(unused: Unit = Unit): SeasonalViewModel
+        fun create(): SeasonalViewModel
     }
 }
