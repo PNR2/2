@@ -54,6 +54,9 @@ class MergedMangaViewModel(
     private val repository = MergedMangaRepository()
     private val manager = MergedMangaManager(sourceManager)
 
+    /** Active row id (may change after re-link). */
+    private var activeMergedId: Long = mergedId
+
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
@@ -61,14 +64,15 @@ class MergedMangaViewModel(
     val openReader: SharedFlow<OpenReader> = _openReader.asSharedFlow()
 
     init {
-        load()
+        load(mergedId)
     }
 
-    private fun load() {
+    private fun load(id: Long) {
         viewModelScope.launch(Dispatchers.IO) {
-            val manga = repository.getMergedMangaById(mergedId)
-            val refs = repository.getReferences(mergedId)
-            val chapters = repository.getChapters(mergedId)
+            activeMergedId = id
+            val manga = repository.getMergedMangaById(id)
+            val refs = repository.getReferences(id)
+            val chapters = repository.getChapters(id)
             _state.update {
                 it.copy(
                     manga = manga,
@@ -86,9 +90,20 @@ class MergedMangaViewModel(
         }
     }
 
+    fun setPaidFilter(filter: PaidFilter) {
+        _state.update {
+            it.copy(paidFilter = filter).withFilteredChapters()
+        }
+    }
+
     fun toggleLanguagePanel() {
         LanguagePanelState.expanded = !LanguagePanelState.expanded
         _state.update { it.copy(languagePanelExpanded = LanguagePanelState.expanded) }
+    }
+
+    fun togglePaidPanel() {
+        PaidPanelState.expanded = !PaidPanelState.expanded
+        _state.update { it.copy(paidPanelExpanded = PaidPanelState.expanded) }
     }
 
     fun relink() {
@@ -99,7 +114,7 @@ class MergedMangaViewModel(
         }
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) {
+                val newId = withContext(Dispatchers.IO) {
                     manager.createOrUpdateMergedManga(
                         title = manga.title,
                         coverUrl = manga.coverUrl,
@@ -108,13 +123,26 @@ class MergedMangaViewModel(
                         malId = manga.malId,
                     )
                 }
-                val refs = repository.getReferences(mergedId)
+                // Always reload from the id search actually updated
+                val idToUse = if (newId > 0) newId else activeMergedId
+                activeMergedId = idToUse
+                val updated = withContext(Dispatchers.IO) {
+                    repository.getMergedMangaById(idToUse)
+                }
+                val refs = withContext(Dispatchers.IO) {
+                    repository.getReferences(idToUse)
+                }
+                val chapters = withContext(Dispatchers.IO) {
+                    repository.getChapters(idToUse)
+                }
                 _state.update {
                     it.copy(
                         isRelinking = false,
+                        manga = updated ?: manga,
                         references = refs,
+                        allChapters = chapters,
                         statusText = "Done. Sources: ${refs.size}",
-                    )
+                    ).withFilteredChapters()
                 }
             } catch (e: Exception) {
                 _state.update {
@@ -131,6 +159,7 @@ class MergedMangaViewModel(
         val current = _state.value
         if (current.isFetchingChapters || current.references.isEmpty()) return
 
+        val id = activeMergedId
         _state.update {
             it.copy(
                 isFetchingChapters = true,
@@ -143,23 +172,25 @@ class MergedMangaViewModel(
                 val fetched = withContext(Dispatchers.IO) {
                     fetchChaptersFromSources(
                         references = current.references,
-                        mergedId = mergedId,
+                        mergedId = id,
                     )
                 }
-                repository.addChapters(fetched)
-                current.references.forEach { ref ->
-                    val count = fetched.count { it.sourceId == ref.sourceId }
-                    if (count > 0) {
-                        repository.updateReferenceChapterCount(
-                            mergedId = mergedId,
-                            sourceId = ref.sourceId,
-                            mangaUrl = ref.mangaUrl,
-                            count = count,
-                        )
+                withContext(Dispatchers.IO) {
+                    repository.addChapters(fetched)
+                    current.references.forEach { ref ->
+                        val count = fetched.count { it.sourceId == ref.sourceId }
+                        if (count > 0) {
+                            repository.updateReferenceChapterCount(
+                                mergedId = id,
+                                sourceId = ref.sourceId,
+                                mangaUrl = ref.mangaUrl,
+                                count = count,
+                            )
+                        }
                     }
                 }
-                val chapters = repository.getChapters(mergedId)
-                val refs = repository.getReferences(mergedId)
+                val chapters = withContext(Dispatchers.IO) { repository.getChapters(id) }
+                val refs = withContext(Dispatchers.IO) { repository.getReferences(id) }
                 _state.update {
                     val next = it.copy(
                         isFetchingChapters = false,
@@ -467,6 +498,32 @@ class MergedMangaViewModel(
         return ch.language?.lowercase(Locale.ROOT)?.trim().orEmpty()
     }
 
+    private fun isPaidChapter(
+        ch: MergedChapter,
+        refs: List<MergedMangaReference>,
+    ): Boolean {
+        val name = ch.name.lowercase(Locale.ROOT)
+        if (name.contains("🔒") || name.contains("lock") || name.contains("paid")) {
+            return true
+        }
+        val sourceName = refs.find { it.sourceId == ch.sourceId }
+            ?.sourceName
+            ?.lowercase(Locale.ROOT)
+            .orEmpty()
+        val paidMarkers = listOf(
+            "k manga",
+            "kmanga",
+            "kodansha",
+            "shonen jump",
+            "viz",
+            "manga plus",
+            "mangaplus",
+            "crunchyroll",
+            "comic walker paid",
+        )
+        return paidMarkers.any { sourceName.contains(it) }
+    }
+
     private fun State.withFilteredChapters(): State {
         val refPriority = references.associate { it.sourceId to it.priority }
         val refChapterCount = references.associate { it.sourceId to it.chapterCount }
@@ -492,7 +549,14 @@ class MergedMangaViewModel(
             }
         }
 
-        val grouped = languageFiltered.groupBy { ch ->
+        // Default list = free only; Paid filter shows paid only
+        val paidAware = when (paidFilter) {
+            PaidFilter.FREE -> languageFiltered.filter { !isPaidChapter(it, references) }
+            PaidFilter.PAID -> languageFiltered.filter { isPaidChapter(it, references) }
+            PaidFilter.ALL -> languageFiltered
+        }
+
+        val grouped = paidAware.groupBy { ch ->
             val vol = volumeNumberOf(ch)
             val num = chapterNumberOf(ch)
             when {
@@ -536,11 +600,21 @@ class MergedMangaViewModel(
             .distinct()
             .sorted()
 
+        val paidCount = allChapters.count { isPaidChapter(it, references) }
+
         return copy(
             displayChapters = unique,
             availableLanguages = languages,
             languagePanelExpanded = LanguagePanelState.expanded,
+            paidPanelExpanded = PaidPanelState.expanded,
+            paidChapterCount = paidCount,
         )
+    }
+
+    enum class PaidFilter {
+        FREE,
+        PAID,
+        ALL,
     }
 
     data class OpenReader(
@@ -556,6 +630,9 @@ class MergedMangaViewModel(
         val availableLanguages: List<String> = emptyList(),
         val languageFilter: String = "en",
         val languagePanelExpanded: Boolean = LanguagePanelState.expanded,
+        val paidFilter: PaidFilter = PaidFilter.FREE,
+        val paidPanelExpanded: Boolean = PaidPanelState.expanded,
+        val paidChapterCount: Int = 0,
         val isLoading: Boolean = true,
         val isRelinking: Boolean = false,
         val isFetchingChapters: Boolean = false,
@@ -571,6 +648,11 @@ class MergedMangaViewModel(
 }
 
 object LanguagePanelState {
+    @Volatile
+    var expanded: Boolean = false
+}
+
+object PaidPanelState {
     @Volatile
     var expanded: Boolean = false
 }
