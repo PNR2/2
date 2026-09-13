@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -168,6 +169,7 @@ data class MergedMangaScreen(
                     }
                 }
 
+                // Language (collapsible)
                 if (state.allChapters.isNotEmpty()) {
                     item {
                         val label = when (state.languageFilter.lowercase()) {
@@ -199,11 +201,7 @@ data class MergedMangaScreen(
                                 } else {
                                     Icons.Outlined.KeyboardArrowDown
                                 },
-                                contentDescription = if (state.languagePanelExpanded) {
-                                    "Collapse"
-                                } else {
-                                    "Expand"
-                                },
+                                contentDescription = null,
                             )
                         }
 
@@ -243,6 +241,88 @@ data class MergedMangaScreen(
                                         },
                                     )
                                 }
+                            }
+                        }
+                    }
+
+                    // Paid (collapsible) — Free by default; Paid only when selected
+                    item {
+                        val paidLabel = when (state.paidFilter) {
+                            MergedMangaViewModel.PaidFilter.FREE -> "Free"
+                            MergedMangaViewModel.PaidFilter.PAID -> "Paid"
+                            MergedMangaViewModel.PaidFilter.ALL -> "All"
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.togglePaidPanel() }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Lock,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                text = "  Access · $paidLabel" +
+                                    if (state.paidChapterCount > 0) {
+                                        " · ${state.paidChapterCount} paid raw"
+                                    } else {
+                                        ""
+                                    },
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Icon(
+                                imageVector = if (state.paidPanelExpanded) {
+                                    Icons.Outlined.KeyboardArrowUp
+                                } else {
+                                    Icons.Outlined.KeyboardArrowDown
+                                },
+                                contentDescription = null,
+                            )
+                        }
+
+                        if (state.paidPanelExpanded) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                FilterChip(
+                                    selected = state.paidFilter ==
+                                        MergedMangaViewModel.PaidFilter.FREE,
+                                    onClick = {
+                                        viewModel.setPaidFilter(
+                                            MergedMangaViewModel.PaidFilter.FREE,
+                                        )
+                                    },
+                                    label = { Text("Free") },
+                                )
+                                FilterChip(
+                                    selected = state.paidFilter ==
+                                        MergedMangaViewModel.PaidFilter.PAID,
+                                    onClick = {
+                                        viewModel.setPaidFilter(
+                                            MergedMangaViewModel.PaidFilter.PAID,
+                                        )
+                                    },
+                                    label = { Text("Paid") },
+                                )
+                                FilterChip(
+                                    selected = state.paidFilter ==
+                                        MergedMangaViewModel.PaidFilter.ALL,
+                                    onClick = {
+                                        viewModel.setPaidFilter(
+                                            MergedMangaViewModel.PaidFilter.ALL,
+                                        )
+                                    },
+                                    label = { Text("All") },
+                                )
                             }
                         }
                     }
@@ -302,7 +382,7 @@ data class MergedMangaScreen(
                             text = if (state.allChapters.isEmpty()) {
                                 "No chapters yet. Tap \"Fetch chapters\"."
                             } else {
-                                "No chapters for this language. Expand Language and try All."
+                                "No chapters for this filter. Try Language All or Access All."
                             },
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
