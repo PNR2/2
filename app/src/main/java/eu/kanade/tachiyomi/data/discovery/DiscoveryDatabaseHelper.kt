@@ -8,10 +8,9 @@ import android.database.sqlite.SQLiteOpenHelper
 
 class DiscoveryDatabaseHelper(
     app: Application,
-) : SQLiteOpenHelper(app, "musyomi_discovery.db", null, 5) {
+) : SQLiteOpenHelper(app, "musyomi_discovery.db", null, 6) {
 
     override fun onCreate(db: SQLiteDatabase) {
-        // RSS News
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS rss_news_article (
@@ -27,7 +26,6 @@ class DiscoveryDatabaseHelper(
             """.trimIndent(),
         )
 
-        // Seasonal / MAL entries
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS mal_discovery_entry (
@@ -49,13 +47,13 @@ class DiscoveryDatabaseHelper(
             """.trimIndent(),
         )
 
-        // Merged manga (cohesive entry)
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS merged_manga (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
                 cover_url TEXT,
+                cover_urls TEXT,
                 synopsis TEXT,
                 author TEXT,
                 artist TEXT,
@@ -69,7 +67,6 @@ class DiscoveryDatabaseHelper(
             """.trimIndent(),
         )
 
-        // Links between merged manga and real extension manga
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS merged_manga_reference (
@@ -87,7 +84,6 @@ class DiscoveryDatabaseHelper(
             """.trimIndent(),
         )
 
-        // Merged chapters (for future use)
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS merged_chapter (
@@ -162,13 +158,10 @@ class DiscoveryDatabaseHelper(
         }
 
         if (oldVersion < 5) {
-            // Add source_name column to existing table
             try {
                 db.execSQL("ALTER TABLE merged_manga_reference ADD COLUMN source_name TEXT")
             } catch (_: Exception) {
             }
-
-            // Create merged_chapter table if missing
             db.execSQL(
                 """
                 CREATE TABLE IF NOT EXISTS merged_chapter (
@@ -184,6 +177,13 @@ class DiscoveryDatabaseHelper(
                 )
                 """.trimIndent(),
             )
+        }
+
+        if (oldVersion < 6) {
+            try {
+                db.execSQL("ALTER TABLE merged_manga ADD COLUMN cover_urls TEXT")
+            } catch (_: Exception) {
+            }
         }
     }
 }
