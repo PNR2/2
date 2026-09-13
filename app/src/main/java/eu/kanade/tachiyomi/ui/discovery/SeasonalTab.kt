@@ -37,11 +37,10 @@ import eu.kanade.presentation.components.TabContent
 import eu.kanade.tachiyomi.data.discovery.MalDiscoveryItem
 import kotlinx.coroutines.flow.collectLatest
 import tachiyomi.i18n.MR
-import tachiyomi.presentation.core.i18n.stringResource
 
 fun seasonalTab(): TabContent {
     return TabContent(
-        titleRes = MR.strings.label_history, // change if you have a seasonal string
+        titleRes = MR.strings.browse,
         searchEnabled = false,
     ) { contentPadding, _ ->
         SeasonalTabContent(contentPadding = contentPadding)
@@ -55,7 +54,7 @@ private fun SeasonalTabContent(
     val navigator = LocalNavigator.currentOrThrow
 
     val viewModel = assistedMetroViewModel<SeasonalViewModel, SeasonalViewModel.Factory> {
-        create(Unit)
+        create()
     }
     val state by viewModel.state.collectAsState()
 
