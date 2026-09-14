@@ -126,7 +126,6 @@ object NewsTab : eu.kanade.presentation.util.Tab {
         var openingNewsKey by remember { mutableStateOf<String?>(null) }
         var openingStatus by remember { mutableStateOf("") }
 
-        // 0 = Any (empty filter). Default = current month + year (vision).
         var filterYear by remember {
             mutableIntStateOf(MalDiscoveryFetcher.currentYear())
         }
@@ -135,6 +134,7 @@ object NewsTab : eu.kanade.presentation.util.Tab {
         }
         var seasonalLoading by remember { mutableStateOf(false) }
         var seasonalStatus by remember { mutableStateOf("") }
+        var currentSort by remember { mutableStateOf(MalDiscoveryRepository.getSortMethod()) }
 
         fun openCohesiveFromTitle(
             title: String,
@@ -210,6 +210,11 @@ object NewsTab : eu.kanade.presentation.util.Tab {
             }
         }
 
+        fun applySort(sort: DiscoverySort) {
+            currentSort = sort
+            MalDiscoveryRepository.setSortMethod(sort)
+        }
+
         Scaffold(
             topBar = {
                 Column {
@@ -230,21 +235,28 @@ object NewsTab : eu.kanade.presentation.util.Tab {
                                     DropdownMenuItem(
                                         text = { Text("Sort by Latest") },
                                         onClick = {
-                                            MalDiscoveryRepository.setSortMethod(DiscoverySort.LATEST)
+                                            applySort(DiscoverySort.LATEST)
                                             showMenu = false
                                         },
                                     )
                                     DropdownMenuItem(
                                         text = { Text("Sort by Score") },
                                         onClick = {
-                                            MalDiscoveryRepository.setSortMethod(DiscoverySort.SCORE)
+                                            applySort(DiscoverySort.SCORE)
+                                            showMenu = false
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Sort by Chapters") },
+                                        onClick = {
+                                            applySort(DiscoverySort.CHAPTERS)
                                             showMenu = false
                                         },
                                     )
                                     DropdownMenuItem(
                                         text = { Text("Sort by Title") },
                                         onClick = {
-                                            MalDiscoveryRepository.setSortMethod(DiscoverySort.TITLE)
+                                            applySort(DiscoverySort.TITLE)
                                             showMenu = false
                                         },
                                     )
@@ -348,10 +360,12 @@ object NewsTab : eu.kanade.presentation.util.Tab {
                         openingMalId = openingMalId,
                         filterYear = filterYear,
                         filterMonth = filterMonth,
+                        currentSort = currentSort,
                         isLoading = seasonalLoading,
                         statusText = seasonalStatus,
                         onYearChange = { filterYear = it },
                         onMonthChange = { filterMonth = it },
+                        onSortChange = { applySort(it) },
                         onApplyFilter = { applySeasonalFilter() },
                         onOpenCohesive = { item ->
                             openCohesiveFromTitle(
@@ -433,10 +447,12 @@ object NewsTab : eu.kanade.presentation.util.Tab {
         openingMalId: Long,
         filterYear: Int,
         filterMonth: Int,
+        currentSort: DiscoverySort,
         isLoading: Boolean,
         statusText: String,
         onYearChange: (Int) -> Unit,
         onMonthChange: (Int) -> Unit,
+        onSortChange: (DiscoverySort) -> Unit,
         onApplyFilter: () -> Unit,
         onOpenCohesive: (MalDiscoveryItem) -> Unit,
     ) {
@@ -450,6 +466,39 @@ object NewsTab : eu.kanade.presentation.util.Tab {
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
+                Text(
+                    text = "Sort (like MAL columns)",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    FilterChip(
+                        selected = currentSort == DiscoverySort.SCORE,
+                        onClick = { onSortChange(DiscoverySort.SCORE) },
+                        label = { Text("Score") },
+                    )
+                    FilterChip(
+                        selected = currentSort == DiscoverySort.CHAPTERS,
+                        onClick = { onSortChange(DiscoverySort.CHAPTERS) },
+                        label = { Text("Chapters") },
+                    )
+                    FilterChip(
+                        selected = currentSort == DiscoverySort.LATEST,
+                        onClick = { onSortChange(DiscoverySort.LATEST) },
+                        label = { Text("Start date") },
+                    )
+                    FilterChip(
+                        selected = currentSort == DiscoverySort.TITLE,
+                        onClick = { onSortChange(DiscoverySort.TITLE) },
+                        label = { Text("Title") },
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "Month (0 = Any)",
                     style = MaterialTheme.typography.labelMedium,
@@ -535,6 +584,7 @@ object NewsTab : eu.kanade.presentation.util.Tab {
                             title = manga.title,
                             coverUrl = manga.coverUrl,
                             score = manga.score,
+                            chapters = manga.chapters,
                             isLoading = openingMalId == manga.malId,
                             onClick = { onOpenCohesive(manga) },
                         )
@@ -568,6 +618,7 @@ object NewsTab : eu.kanade.presentation.util.Tab {
                         title = manga.title,
                         coverUrl = manga.coverUrl,
                         score = null,
+                        chapters = null,
                         isLoading = false,
                         onClick = {
                             navigator.push(MergedMangaScreen(mergedId = manga.id))
@@ -673,6 +724,7 @@ object NewsTab : eu.kanade.presentation.util.Tab {
         title: String,
         coverUrl: String?,
         score: Double?,
+        chapters: Int?,
         isLoading: Boolean,
         onClick: () -> Unit,
     ) {
@@ -700,9 +752,16 @@ object NewsTab : eu.kanade.presentation.util.Tab {
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-                    if (score != null && score > 0.0) {
+                    val meta = buildString {
+                        if (score != null && score > 0.0) append("⭐ $score")
+                        if (chapters != null && chapters > 0) {
+                            if (isNotEmpty()) append(" · ")
+                            append("$chapters ch")
+                        }
+                    }
+                    if (meta.isNotEmpty()) {
                         Text(
-                            text = "⭐ $score",
+                            text = meta,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                         )
