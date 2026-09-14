@@ -15,6 +15,7 @@ import uy.kohesive.injekt.api.get
 enum class DiscoverySort {
     LATEST,
     SCORE,
+    CHAPTERS,
     TITLE,
 }
 
@@ -26,7 +27,7 @@ class MalDiscoveryRepository {
         private val prefs = application.getSharedPreferences("discovery_prefs", Context.MODE_PRIVATE)
 
         private val mangaFlowState = MutableStateFlow<List<MalDiscoveryItem>>(emptyList())
-        private var currentSort = DiscoverySort.LATEST
+        private var currentSort = DiscoverySort.SCORE
 
         init {
             refreshFlow()
@@ -40,6 +41,8 @@ class MalDiscoveryRepository {
             prefs.edit().putBoolean("automation_enabled", enabled).apply()
         }
 
+        fun getSortMethod(): DiscoverySort = currentSort
+
         fun setSortMethod(sort: DiscoverySort) {
             currentSort = sort
             refreshFlow()
@@ -51,6 +54,7 @@ class MalDiscoveryRepository {
                 val orderBy = when (currentSort) {
                     DiscoverySort.LATEST -> "start_date DESC"
                     DiscoverySort.SCORE -> "score DESC"
+                    DiscoverySort.CHAPTERS -> "chapters DESC"
                     DiscoverySort.TITLE -> "title ASC"
                 }
 
@@ -81,8 +85,12 @@ class MalDiscoveryRepository {
                                 } else {
                                     null
                                 },
-                                startDate = cursor.getString(cursor.getColumnIndexOrThrow("start_date")),
-                                isSeasonal = cursor.getInt(cursor.getColumnIndexOrThrow("is_seasonal")) == 1,
+                                startDate = cursor.getString(
+                                    cursor.getColumnIndexOrThrow("start_date"),
+                                ),
+                                isSeasonal = cursor.getInt(
+                                    cursor.getColumnIndexOrThrow("is_seasonal"),
+                                ) == 1,
                                 sourceId = if (sourceIdIdx >= 0 && !cursor.isNull(sourceIdIdx)) {
                                     cursor.getLong(sourceIdIdx)
                                 } else {
@@ -119,7 +127,7 @@ class MalDiscoveryRepository {
                 }
                 cursor.close()
                 mangaFlowState.value = list
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 mangaFlowState.value = emptyList()
             }
         }
@@ -160,12 +168,10 @@ class MalDiscoveryRepository {
                 db.endTransaction()
             }
             refreshFlow()
-        } catch (e: Exception) {
-            // Ignore so the app does not crash
+        } catch (_: Exception) {
         }
     }
 
-    /** Save the Auto-Link result for a MAL manga */
     fun saveAutoLink(malId: Long, sourceId: Long, mangaUrl: String) {
         try {
             val db = dbHelper.writableDatabase
