@@ -17,6 +17,7 @@ import eu.kanade.tachiyomi.data.discovery.MergedManga
 import eu.kanade.tachiyomi.data.discovery.MergedMangaManager
 import eu.kanade.tachiyomi.data.discovery.MergedMangaReference
 import eu.kanade.tachiyomi.data.discovery.MergedMangaRepository
+import eu.kanade.tachiyomi.data.discovery.ScanlationFetcher
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
@@ -70,7 +71,7 @@ class MergedMangaViewModel(
     private fun load(id: Long) {
         viewModelScope.launch(Dispatchers.IO) {
             activeMergedId = id
-            val manga = repository.getMergedMangaById(id)
+            var manga = repository.getMergedMangaById(id)
             val refs = repository.getReferences(id)
             val chapters = repository.getChapters(id)
             _state.update {
@@ -80,6 +81,19 @@ class MergedMangaViewModel(
                     allChapters = chapters,
                     isLoading = false,
                 ).withFilteredChapters()
+            }
+
+            // Vision: scanlation from MangaUpdates; leave empty if unknown
+            if (manga != null && manga.scanlationGroups.isNullOrBlank()) {
+                try {
+                    val groups = ScanlationFetcher().fetchGroupsForTitle(manga.title)
+                    if (!groups.isNullOrBlank()) {
+                        repository.updateScanlationGroups(id, groups)
+                        manga = repository.getMergedMangaById(id)
+                        _state.update { it.copy(manga = manga) }
+                    }
+                } catch (_: Exception) {
+                }
             }
         }
     }
@@ -123,7 +137,6 @@ class MergedMangaViewModel(
                         malId = manga.malId,
                     )
                 }
-                // Always reload from the id search actually updated
                 val idToUse = if (newId > 0) newId else activeMergedId
                 activeMergedId = idToUse
                 val updated = withContext(Dispatchers.IO) {
@@ -549,7 +562,6 @@ class MergedMangaViewModel(
             }
         }
 
-        // Default list = free only; Paid filter shows paid only
         val paidAware = when (paidFilter) {
             PaidFilter.FREE -> languageFiltered.filter { !isPaidChapter(it, references) }
             PaidFilter.PAID -> languageFiltered.filter { isPaidChapter(it, references) }
