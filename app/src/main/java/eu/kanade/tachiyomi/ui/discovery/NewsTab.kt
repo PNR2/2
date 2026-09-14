@@ -5,6 +5,7 @@ package eu.kanade.tachiyomi.ui.discovery
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.FilterList
@@ -31,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -67,6 +70,7 @@ import coil3.compose.AsyncImage
 import eu.kanade.tachiyomi.data.discovery.DiscoveryProgressState
 import eu.kanade.tachiyomi.data.discovery.DiscoverySort
 import eu.kanade.tachiyomi.data.discovery.DiscoverySyncer
+import eu.kanade.tachiyomi.data.discovery.MalDiscoveryFetcher
 import eu.kanade.tachiyomi.data.discovery.MalDiscoveryItem
 import eu.kanade.tachiyomi.data.discovery.MalDiscoveryRepository
 import eu.kanade.tachiyomi.data.discovery.MergedManga
@@ -103,6 +107,7 @@ object NewsTab : eu.kanade.presentation.util.Tab {
         val rssRepo = remember { RssNewsRepository() }
         val malRepo = remember { MalDiscoveryRepository() }
         val mergedRepo = remember { MergedMangaRepository() }
+        val malFetcher = remember { MalDiscoveryFetcher() }
         val coroutineScope = rememberCoroutineScope()
         val navigator = LocalNavigator.currentOrThrow
 
@@ -120,6 +125,16 @@ object NewsTab : eu.kanade.presentation.util.Tab {
         var openingMalId by remember { mutableLongStateOf(-1L) }
         var openingNewsKey by remember { mutableStateOf<String?>(null) }
         var openingStatus by remember { mutableStateOf("") }
+
+        // 0 = Any (empty filter). Default = current month + year (vision).
+        var filterYear by remember {
+            mutableIntStateOf(MalDiscoveryFetcher.currentYear())
+        }
+        var filterMonth by remember {
+            mutableIntStateOf(MalDiscoveryFetcher.currentMonth())
+        }
+        var seasonalLoading by remember { mutableStateOf(false) }
+        var seasonalStatus by remember { mutableStateOf("") }
 
         fun openCohesiveFromTitle(
             title: String,
@@ -164,6 +179,33 @@ object NewsTab : eu.kanade.presentation.util.Tab {
                     openingNewsKey = null
                     openingMalId = -1L
                     openingStatus = "Error: ${e.message}"
+                }
+            }
+        }
+
+        fun applySeasonalFilter() {
+            if (seasonalLoading) return
+            seasonalLoading = true
+            seasonalStatus = "Loading seasonal manga…"
+            coroutineScope.launch {
+                try {
+                    val year = filterYear.takeIf { it > 0 }
+                    val month = filterMonth.takeIf { it in 1..12 }
+                    val list = withContext(Dispatchers.IO) {
+                        malFetcher.fetchSeasonalManga(year = year, month = month)
+                    }
+                    withContext(Dispatchers.IO) {
+                        malRepo.insertSeasonalManga(list)
+                    }
+                    seasonalStatus = when {
+                        year == null && month == null -> "Showing: Any date"
+                        year != null && month == null -> "Showing: $year (any month)"
+                        else -> "Showing: ${month.toString().padStart(2, '0')}/$year"
+                    }
+                } catch (e: Exception) {
+                    seasonalStatus = "Error: ${e.message}"
+                } finally {
+                    seasonalLoading = false
                 }
             }
         }
@@ -304,6 +346,13 @@ object NewsTab : eu.kanade.presentation.util.Tab {
                     1 -> SeasonalGrid(
                         mangaList = seasonalManga,
                         openingMalId = openingMalId,
+                        filterYear = filterYear,
+                        filterMonth = filterMonth,
+                        isLoading = seasonalLoading,
+                        statusText = seasonalStatus,
+                        onYearChange = { filterYear = it },
+                        onMonthChange = { filterMonth = it },
+                        onApplyFilter = { applySeasonalFilter() },
                         onOpenCohesive = { item ->
                             openCohesiveFromTitle(
                                 title = item.title,
@@ -382,31 +431,114 @@ object NewsTab : eu.kanade.presentation.util.Tab {
     private fun SeasonalGrid(
         mangaList: List<MalDiscoveryItem>,
         openingMalId: Long,
+        filterYear: Int,
+        filterMonth: Int,
+        isLoading: Boolean,
+        statusText: String,
+        onYearChange: (Int) -> Unit,
+        onMonthChange: (Int) -> Unit,
+        onApplyFilter: () -> Unit,
         onOpenCohesive: (MalDiscoveryItem) -> Unit,
     ) {
-        if (mangaList.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    text = "Hit the refresh button to pull seasonal manga!",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+        val currentY = MalDiscoveryFetcher.currentYear()
+        val years = listOf(0) + (currentY downTo currentY - 8).toList()
+        val months = listOf(0) + (1..12).toList()
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
-                items(mangaList, key = { it.malId }) { manga ->
-                    MangaCard(
-                        title = manga.title,
-                        coverUrl = manga.coverUrl,
-                        score = manga.score,
-                        isLoading = openingMalId == manga.malId,
-                        onClick = { onOpenCohesive(manga) },
+                Text(
+                    text = "Month (0 = Any)",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    months.forEach { m ->
+                        FilterChip(
+                            selected = filterMonth == m,
+                            onClick = { onMonthChange(m) },
+                            label = {
+                                Text(
+                                    if (m == 0) "Any" else m.toString().padStart(2, '0'),
+                                )
+                            },
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Year (0 = Any)",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    years.forEach { y ->
+                        FilterChip(
+                            selected = filterYear == y,
+                            onClick = { onYearChange(y) },
+                            label = { Text(if (y == 0) "Any" else y.toString()) },
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = onApplyFilter,
+                    enabled = !isLoading,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (isLoading) "Loading…" else "Apply filter")
+                }
+
+                if (statusText.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = statusText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
                     )
+                }
+            }
+
+            if (mangaList.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "Apply filter or hit hub Refresh for seasonal manga.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    items(mangaList, key = { it.malId }) { manga ->
+                        MangaCard(
+                            title = manga.title,
+                            coverUrl = manga.coverUrl,
+                            score = manga.score,
+                            isLoading = openingMalId == manga.malId,
+                            onClick = { onOpenCohesive(manga) },
+                        )
+                    }
                 }
             }
         }
