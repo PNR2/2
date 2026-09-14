@@ -14,7 +14,6 @@ data class MergedManga(
     val id: Long = 0,
     val title: String,
     val coverUrl: String? = null,
-    /** Extra covers, pipe-separated in DB; exposed as list. */
     val coverUrls: List<String> = emptyList(),
     val synopsis: String? = null,
     val author: String? = null,
@@ -23,10 +22,11 @@ data class MergedManga(
     val genres: String? = null,
     val malId: Long? = null,
     val preferredLanguage: String = "en",
+    /** Comma-separated scanlation groups; empty/null if unknown */
+    val scanlationGroups: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
 ) {
-    /** Primary + extras, unique, non-blank — for the cover pager. */
     fun allCovers(): List<String> {
         return (listOfNotNull(coverUrl) + coverUrls)
             .map { it.trim() }
@@ -103,6 +103,7 @@ class MergedMangaRepository {
         private fun readMergedManga(cursor: android.database.Cursor): MergedManga {
             val malIdx = cursor.getColumnIndex("mal_id")
             val coverUrlsIdx = cursor.getColumnIndex("cover_urls")
+            val scanIdx = cursor.getColumnIndex("scanlation_groups")
             return MergedManga(
                 id = cursor.getLong(cursor.getColumnIndexOrThrow("id")),
                 title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
@@ -125,6 +126,11 @@ class MergedMangaRepository {
                 preferredLanguage = cursor.getString(
                     cursor.getColumnIndexOrThrow("preferred_language"),
                 ) ?: "en",
+                scanlationGroups = if (scanIdx >= 0 && !cursor.isNull(scanIdx)) {
+                    cursor.getString(scanIdx)
+                } else {
+                    null
+                },
                 createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
                 updatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("updated_at")),
             )
@@ -142,6 +148,7 @@ class MergedMangaRepository {
         genres: String? = null,
         malId: Long? = null,
         preferredLanguage: String = "en",
+        scanlationGroups: String? = null,
     ): Long {
         val db = dbHelper.writableDatabase
         val now = System.currentTimeMillis()
@@ -176,6 +183,9 @@ class MergedMangaRepository {
             put("genres", genres)
             if (malId != null) put("mal_id", malId) else putNull("mal_id")
             put("preferred_language", preferredLanguage)
+            if (scanlationGroups != null) {
+                put("scanlation_groups", scanlationGroups)
+            }
             put("updated_at", now)
         }
 
@@ -184,11 +194,18 @@ class MergedMangaRepository {
             existingId
         } else {
             values.put("created_at", now)
+            if (scanlationGroups == null) {
+                putNullSafe(values, "scanlation_groups")
+            }
             db.insert("merged_manga", null, values)
         }
 
         refreshFlow()
         return id
+    }
+
+    private fun putNullSafe(values: ContentValues, key: String) {
+        values.putNull(key)
     }
 
     fun createOrUpdateMergedManga(manga: MergedManga): Long {
@@ -203,7 +220,25 @@ class MergedMangaRepository {
             genres = manga.genres,
             malId = manga.malId,
             preferredLanguage = manga.preferredLanguage,
+            scanlationGroups = manga.scanlationGroups,
         )
+    }
+
+    fun updateScanlationGroups(mergedId: Long, groups: String?) {
+        try {
+            val values = ContentValues().apply {
+                put("scanlation_groups", groups)
+                put("updated_at", System.currentTimeMillis())
+            }
+            dbHelper.writableDatabase.update(
+                "merged_manga",
+                values,
+                "id = ?",
+                arrayOf(mergedId.toString()),
+            )
+            refreshFlow()
+        } catch (_: Exception) {
+        }
     }
 
     fun updateCoverUrls(mergedId: Long, coverUrl: String?, coverUrls: List<String>) {
