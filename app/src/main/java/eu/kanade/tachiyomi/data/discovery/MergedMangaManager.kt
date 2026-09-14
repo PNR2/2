@@ -24,6 +24,14 @@ import tachiyomi.domain.source.service.SourceManager
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
+/**
+ * Cohesive search — speed-tuned:
+ * - English sources first, hard cap on sources
+ * - Higher parallelism (16)
+ * - Shorter per-source timeout (4s)
+ * - One query string when clean == raw
+ * - Early primary emit when strong match appears
+ */
 class MergedMangaManager(
     private val sourceManager: SourceManager,
 ) {
@@ -98,6 +106,7 @@ class MergedMangaManager(
                 .filterIsInstance<CatalogueSource>()
                 .filter { it.lang.isNotBlank() }
                 .sortedByDescending { isEnglishLang(it.lang) }
+                .take(MAX_SEARCH_SOURCES)
 
             if (sources.isEmpty()) {
                 val id = repository.createOrUpdateMergedManga(
@@ -127,7 +136,7 @@ class MergedMangaManager(
             var primaryCover = coverUrl
             var linkedCount = 0
 
-            val semaphore = Semaphore(10)
+            val semaphore = Semaphore(PARALLELISM)
             var completed = 0
 
             coroutineScope {
@@ -483,10 +492,10 @@ class MergedMangaManager(
         val found = LinkedHashMap<String, SourceHit>()
         for (query in queries) {
             try {
-                val page = withTimeoutOrNull(6_000) {
+                val page = withTimeoutOrNull(SOURCE_TIMEOUT_MS) {
                     source.getSearchManga(1, query, FilterList())
                 } ?: continue
-                page.mangas.take(4).forEach { manga ->
+                page.mangas.take(3).forEach { manga ->
                     if (!found.containsKey(manga.url)) {
                         found[manga.url] = SourceHit(
                             sourceId = source.id,
@@ -648,12 +657,21 @@ class MergedMangaManager(
 
     companion object {
         private const val MIN_SCORE = 45
-        private const val PRIMARY_EARLY_SCORE = 80
+        private const val PRIMARY_EARLY_SCORE = 75
         private const val PRIMARY_MIN_QUERY_SCORE = 70
         private const val SIMILAR_MIN_SCORE = 55
         private const val MAX_SOURCES = 25
         private const val MAX_SIMILAR = 6
         private const val MAX_COVERS = 12
+
+        /** Cap how many extensions we hit (English sorted first). */
+        private const val MAX_SEARCH_SOURCES = 35
+
+        /** Parallel searches at once. */
+        private const val PARALLELISM = 16
+
+        /** Per-extension search timeout. */
+        private const val SOURCE_TIMEOUT_MS = 4_000L
 
         private val runningJobs = ConcurrentHashMap<String, Job>()
         private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
