@@ -8,7 +8,7 @@ import android.database.sqlite.SQLiteOpenHelper
 
 class DiscoveryDatabaseHelper(
     app: Application,
-) : SQLiteOpenHelper(app, "musyomi_discovery.db", null, 6) {
+) : SQLiteOpenHelper(app, "musyomi_discovery.db", null, 7) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -61,6 +61,7 @@ class DiscoveryDatabaseHelper(
                 genres TEXT,
                 mal_id INTEGER,
                 preferred_language TEXT DEFAULT 'en',
+                scanlation_groups TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )
@@ -182,6 +183,13 @@ class DiscoveryDatabaseHelper(
         if (oldVersion < 6) {
             try {
                 db.execSQL("ALTER TABLE merged_manga ADD COLUMN cover_urls TEXT")
+            } catch (_: Exception) {
+            }
+        }
+
+        if (oldVersion < 7) {
+            try {
+                db.execSQL("ALTER TABLE merged_manga ADD COLUMN scanlation_groups TEXT")
             } catch (_: Exception) {
             }
         }
