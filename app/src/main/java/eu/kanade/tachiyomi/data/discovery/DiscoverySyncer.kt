@@ -12,9 +12,8 @@ import uy.kohesive.injekt.api.get
  * Discovery Hub sync:
  * 1) RSS news
  * 2) MAL seasonal manga
- * 3) Re-link cohesive (merged) entries older than 7 days (vision: weekly auto refresh)
- *
- * Extension search uses SourceManager when available (same pattern as NewsTab open cohesive).
+ * 3) Auto-link top seasonal titles → cohesive (vision)
+ * 4) Re-link cohesive entries older than 7 days
  */
 object DiscoverySyncer {
 
@@ -24,11 +23,10 @@ object DiscoverySyncer {
     private val malRepository = MalDiscoveryRepository()
     private val mergedRepository = MergedMangaRepository()
 
-    /** 7 days in milliseconds — vision weekly refresh */
     private const val STALE_MS = 7L * 24L * 60L * 60L * 1000L
-
-    /** Cap so sync does not run forever */
-    private const val MAX_REFRESH = 5
+    private const val MAX_STALE_REFRESH = 5
+    /** How many new seasonal titles to auto-link each sync */
+    private const val MAX_SEASONAL_AUTOLINK = 6
 
     suspend fun syncNow() {
         if (DiscoveryProgressState.progress.value.isRunning) return
@@ -37,7 +35,7 @@ object DiscoverySyncer {
 
         // ===== NEWS =====
         try {
-            DiscoveryProgressState.update(true, 20, "Fetching news...")
+            DiscoveryProgressState.update(true, 15, "Fetching news...")
             withTimeoutOrNull(15_000) {
                 val news = rssFetcher.fetchNews(
                     "https://www.animenewsnetwork.com/news/rss.xml",
@@ -51,22 +49,30 @@ object DiscoverySyncer {
         }
 
         // ===== SEASONAL MANGA =====
+        var seasonalList: List<MalDiscoveryItem> = emptyList()
         try {
-            DiscoveryProgressState.update(true, 45, "Fetching seasonal manga...")
-            val mangaList = withTimeoutOrNull(25_000) {
+            DiscoveryProgressState.update(true, 35, "Fetching seasonal manga...")
+            seasonalList = withTimeoutOrNull(25_000) {
                 malFetcher.fetchSeasonalManga()
             } ?: emptyList()
 
-            if (mangaList.isNotEmpty()) {
-                DiscoveryProgressState.update(true, 60, "Saving seasonal manga...")
-                malRepository.insertSeasonalManga(mangaList)
+            if (seasonalList.isNotEmpty()) {
+                DiscoveryProgressState.update(true, 50, "Saving seasonal manga...")
+                malRepository.insertSeasonalManga(seasonalList)
             }
         } catch (_: Exception) {
         }
 
-        // ===== COHESIVE WEEKLY REFRESH =====
+        // ===== AUTO-LINK NEW SEASONAL → COHESIVE =====
         try {
-            DiscoveryProgressState.update(true, 70, "Refreshing cohesive entries...")
+            DiscoveryProgressState.update(true, 60, "Auto-linking seasonal manga...")
+            autoLinkSeasonal(seasonalList)
+        } catch (_: Exception) {
+        }
+
+        // ===== WEEKLY COHESIVE REFRESH =====
+        try {
+            DiscoveryProgressState.update(true, 80, "Refreshing stale cohesive entries...")
             refreshStaleMergedEntries()
         } catch (_: Exception) {
         }
@@ -77,8 +83,61 @@ object DiscoverySyncer {
     }
 
     /**
+     * Creates cohesive entries for top seasonal titles that are not yet linked.
+     * Skips titles that already exist in merged_manga (by malId or title).
+     */
+    private suspend fun autoLinkSeasonal(list: List<MalDiscoveryItem>) {
+        if (list.isEmpty()) return
+
+        val sourceManager = try {
+            Injekt.get<SourceManager>()
+        } catch (_: Exception) {
+            DiscoveryProgressState.update(true, 75, "Skip auto-link (no SourceManager)")
+            return
+        }
+
+        val manager = MergedMangaManager(sourceManager)
+        val existing = mergedRepository.subscribeToMergedManga().value
+        val existingMalIds = existing.mapNotNull { it.malId }.toHashSet()
+        val existingTitles = existing.map { it.title.trim().lowercase() }.toHashSet()
+
+        val candidates = list
+            .filter { item ->
+                item.malId > 0 &&
+                    item.malId !in existingMalIds &&
+                    item.title.trim().lowercase() !in existingTitles
+            }
+            .take(MAX_SEASONAL_AUTOLINK)
+
+        if (candidates.isEmpty()) {
+            DiscoveryProgressState.update(true, 75, "Seasonal already linked")
+            return
+        }
+
+        candidates.forEachIndexed { index, manga ->
+            val pct = 60 + ((index + 1) * 15 / candidates.size).coerceAtMost(15)
+            DiscoveryProgressState.update(
+                true,
+                pct,
+                "Auto-link ${index + 1}/${candidates.size}: ${manga.title}",
+            )
+            try {
+                withTimeoutOrNull(40_000) {
+                    manager.createOrUpdateMergedManga(
+                        title = manga.title,
+                        coverUrl = manga.coverUrl,
+                        synopsis = manga.synopsis,
+                        author = manga.authors,
+                        malId = manga.malId,
+                    )
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /**
      * Re-runs extension search for merged entries not updated in 7 days.
-     * Keeps sources alive when one extension dies (vision).
      */
     private suspend fun refreshStaleMergedEntries() {
         val sourceManager = try {
@@ -86,8 +145,8 @@ object DiscoverySyncer {
         } catch (_: Exception) {
             DiscoveryProgressState.update(
                 true,
-                90,
-                "Skip cohesive refresh (no SourceManager)",
+                95,
+                "Skip stale refresh (no SourceManager)",
             )
             return
         }
@@ -96,26 +155,24 @@ object DiscoverySyncer {
         val now = System.currentTimeMillis()
 
         val stale = mergedRepository.subscribeToMergedManga().value
-            .filter { manga ->
-                (now - manga.updatedAt) >= STALE_MS
-            }
+            .filter { manga -> (now - manga.updatedAt) >= STALE_MS }
             .sortedBy { it.updatedAt }
-            .take(MAX_REFRESH)
+            .take(MAX_STALE_REFRESH)
 
         if (stale.isEmpty()) {
-            DiscoveryProgressState.update(true, 90, "Cohesive entries are up to date")
+            DiscoveryProgressState.update(true, 95, "Cohesive entries are up to date")
             return
         }
 
         stale.forEachIndexed { index, manga ->
-            val pct = 70 + ((index + 1) * 20 / stale.size).coerceAtMost(20)
+            val pct = 80 + ((index + 1) * 15 / stale.size).coerceAtMost(15)
             DiscoveryProgressState.update(
                 true,
                 pct,
                 "Refreshing ${index + 1}/${stale.size}: ${manga.title}",
             )
             try {
-                withTimeoutOrNull(45_000) {
+                withTimeoutOrNull(40_000) {
                     manager.createOrUpdateMergedManga(
                         title = manga.title,
                         coverUrl = manga.coverUrl,
