@@ -2,6 +2,7 @@
 
 package eu.kanade.tachiyomi.ui.discovery
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -39,11 +40,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
@@ -74,6 +79,13 @@ data class MergedMangaScreen(
         val title = manga?.title ?: "…"
         val synopsis = manga?.synopsis
         val covers = manga?.allCovers().orEmpty()
+        val scanlation = manga?.scanlationGroups
+        val author = manga?.author
+        val artist = manga?.artist
+        val genres = manga?.genres
+        val status = manga?.status
+
+        var synopsisExpanded by remember { mutableStateOf(false) }
 
         LaunchedEffect(viewModel) {
             viewModel.openReader.collectLatest { open ->
@@ -109,7 +121,6 @@ data class MergedMangaScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item {
-                    // Multi-cover swipe
                     if (covers.isNotEmpty()) {
                         val pagerState = rememberPagerState(pageCount = { covers.size })
                         HorizontalPager(
@@ -142,14 +153,74 @@ data class MergedMangaScreen(
                         fontWeight = FontWeight.Bold,
                     )
 
-                    if (!synopsis.isNullOrEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                    // Author / artist / status (Mihon-like info row)
+                    val infoLine = buildString {
+                        if (!author.isNullOrBlank()) append(author)
+                        if (!artist.isNullOrBlank() && artist != author) {
+                            if (isNotEmpty()) append(" · ")
+                            append(artist)
+                        }
+                        if (!status.isNullOrBlank()) {
+                            if (isNotEmpty()) append(" · ")
+                            append(status)
+                        }
+                    }
+                    if (infoLine.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = synopsis,
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = infoLine,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+
+                    if (!genres.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = genres,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    // Expandable synopsis (like Mihon)
+                    if (!synopsis.isNullOrEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .animateContentSize()
+                                .clickable { synopsisExpanded = !synopsisExpanded },
+                        ) {
+                            Text(
+                                text = synopsis,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = if (synopsisExpanded) Int.MAX_VALUE else 3,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = if (synopsisExpanded) "Show less" else "Show more",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                    }
+
+                    // Scanlation (vision: separate at bottom of header)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = if (!scanlation.isNullOrBlank()) {
+                            "Scanlation: $scanlation"
+                        } else {
+                            "Scanlation: —"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
 
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -191,7 +262,6 @@ data class MergedMangaScreen(
                     }
                 }
 
-                // Language panel
                 if (state.allChapters.isNotEmpty()) {
                     item {
                         val label = when (state.languageFilter.lowercase()) {
@@ -267,7 +337,6 @@ data class MergedMangaScreen(
                         }
                     }
 
-                    // Paid / Free access panel
                     item {
                         val paidLabel = when (state.paidFilter) {
                             MergedMangaViewModel.PaidFilter.FREE -> "Free"
