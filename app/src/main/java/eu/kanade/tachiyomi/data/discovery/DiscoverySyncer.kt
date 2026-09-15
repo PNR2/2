@@ -25,6 +25,7 @@ object DiscoverySyncer {
 
     private const val STALE_MS = 7L * 24L * 60L * 60L * 1000L
     private const val MAX_STALE_REFRESH = 5
+
     /** How many new seasonal titles to auto-link each sync */
     private const val MAX_SEASONAL_AUTOLINK = 6
 
