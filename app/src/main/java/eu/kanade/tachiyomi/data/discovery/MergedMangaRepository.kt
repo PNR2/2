@@ -22,7 +22,6 @@ data class MergedManga(
     val genres: String? = null,
     val malId: Long? = null,
     val preferredLanguage: String = "en",
-    /** Comma-separated scanlation groups; empty/null if unknown */
     val scanlationGroups: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
@@ -195,17 +194,13 @@ class MergedMangaRepository {
         } else {
             values.put("created_at", now)
             if (scanlationGroups == null) {
-                putNullSafe(values, "scanlation_groups")
+                values.putNull("scanlation_groups")
             }
             db.insert("merged_manga", null, values)
         }
 
         refreshFlow()
         return id
-    }
-
-    private fun putNullSafe(values: ContentValues, key: String) {
-        values.putNull(key)
     }
 
     fun createOrUpdateMergedManga(manga: MergedManga): Long {
@@ -222,6 +217,53 @@ class MergedMangaRepository {
             preferredLanguage = manga.preferredLanguage,
             scanlationGroups = manga.scanlationGroups,
         )
+    }
+
+    /**
+     * Fill missing metadata from extension details without wiping other fields.
+     */
+    fun updateDetailsIfBlank(
+        mergedId: Long,
+        author: String? = null,
+        artist: String? = null,
+        status: String? = null,
+        genres: String? = null,
+        synopsis: String? = null,
+        coverUrl: String? = null,
+    ) {
+        try {
+            val current = getMergedMangaById(mergedId) ?: return
+            val values = ContentValues().apply {
+                if (current.author.isNullOrBlank() && !author.isNullOrBlank()) {
+                    put("author", author)
+                }
+                if (current.artist.isNullOrBlank() && !artist.isNullOrBlank()) {
+                    put("artist", artist)
+                }
+                if (current.status.isNullOrBlank() && !status.isNullOrBlank()) {
+                    put("status", status)
+                }
+                if (current.genres.isNullOrBlank() && !genres.isNullOrBlank()) {
+                    put("genres", genres)
+                }
+                if (current.synopsis.isNullOrBlank() && !synopsis.isNullOrBlank()) {
+                    put("synopsis", synopsis)
+                }
+                if (current.coverUrl.isNullOrBlank() && !coverUrl.isNullOrBlank()) {
+                    put("cover_url", coverUrl)
+                }
+                put("updated_at", System.currentTimeMillis())
+            }
+            if (values.size() <= 1) return
+            dbHelper.writableDatabase.update(
+                "merged_manga",
+                values,
+                "id = ?",
+                arrayOf(mergedId.toString()),
+            )
+            refreshFlow()
+        } catch (_: Exception) {
+        }
     }
 
     fun updateScanlationGroups(mergedId: Long, groups: String?) {
