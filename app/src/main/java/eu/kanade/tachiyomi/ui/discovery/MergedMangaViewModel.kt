@@ -55,7 +55,6 @@ class MergedMangaViewModel(
     private val repository = MergedMangaRepository()
     private val manager = MergedMangaManager(sourceManager)
 
-    /** Active row id (may change after re-link). */
     private var activeMergedId: Long = mergedId
 
     private val _state = MutableStateFlow(State())
@@ -83,7 +82,6 @@ class MergedMangaViewModel(
                 ).withFilteredChapters()
             }
 
-            // Vision: scanlation from MangaUpdates; leave empty if unknown
             if (manga != null && manga.scanlationGroups.isNullOrBlank()) {
                 try {
                     val groups = ScanlationFetcher().fetchGroupsForTitle(manga.title)
@@ -201,14 +199,18 @@ class MergedMangaViewModel(
                             )
                         }
                     }
+                    // Vision: fill author / genres / status from best source
+                    fillDetailsFromBestSource(current.references)
                 }
                 val chapters = withContext(Dispatchers.IO) { repository.getChapters(id) }
                 val refs = withContext(Dispatchers.IO) { repository.getReferences(id) }
+                val manga = withContext(Dispatchers.IO) { repository.getMergedMangaById(id) }
                 _state.update {
                     val next = it.copy(
                         isFetchingChapters = false,
                         allChapters = chapters,
                         references = refs,
+                        manga = manga ?: it.manga,
                     ).withFilteredChapters()
                     next.copy(
                         statusText = "Fetched ${chapters.size} chapters → " +
@@ -222,6 +224,60 @@ class MergedMangaViewModel(
                         statusText = "Error: ${e.message}",
                     )
                 }
+            }
+        }
+    }
+
+    private suspend fun fillDetailsFromBestSource(references: List<MergedMangaReference>) {
+        val sorted = references.sortedByDescending { it.priority }
+        for (ref in sorted.take(3)) {
+            try {
+                val source = sourceManager.get(ref.sourceId) ?: continue
+                val sManga = SManga.create().apply {
+                    url = ref.mangaUrl
+                    title = ref.mangaTitle ?: ""
+                }
+                val updated = withTimeoutOrNull(12_000) {
+                    source.getMangaUpdate(
+                        manga = sManga,
+                        chapters = emptyList(),
+                        fetchDetails = true,
+                        fetchChapters = false,
+                    )
+                } ?: continue
+
+                val detail = updated.manga
+                val genreStr = detail.genre
+                    ?.split(",")
+                    ?.map { it.trim() }
+                    ?.filter { it.isNotEmpty() }
+                    ?.joinToString(", ")
+                    ?.ifBlank { null }
+
+                val statusStr = when (detail.status.toInt()) {
+                    SManga.ONGOING -> "Ongoing"
+                    SManga.COMPLETED -> "Completed"
+                    SManga.LICENSED -> "Licensed"
+                    SManga.PUBLISHING_FINISHED -> "Publishing finished"
+                    SManga.CANCELLED -> "Cancelled"
+                    SManga.ON_HIATUS -> "On hiatus"
+                    else -> null
+                }
+
+                repository.updateDetailsIfBlank(
+                    mergedId = activeMergedId,
+                    author = detail.author,
+                    artist = detail.artist,
+                    status = statusStr,
+                    genres = genreStr,
+                    synopsis = detail.description,
+                    coverUrl = detail.thumbnail_url,
+                )
+                // Stop after first source that gave useful metadata
+                if (!detail.author.isNullOrBlank() || !detail.description.isNullOrBlank()) {
+                    break
+                }
+            } catch (_: Exception) {
             }
         }
     }
