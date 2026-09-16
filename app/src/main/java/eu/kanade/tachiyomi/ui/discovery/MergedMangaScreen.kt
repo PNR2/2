@@ -2,6 +2,8 @@
 
 package eu.kanade.tachiyomi.ui.discovery
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -33,6 +35,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -84,6 +87,7 @@ data class MergedMangaScreen(
         val artist = manga?.artist
         val genres = manga?.genres
         val status = manga?.status
+        val malId = manga?.malId
 
         var synopsisExpanded by remember { mutableStateOf(false) }
 
@@ -153,7 +157,6 @@ data class MergedMangaScreen(
                         fontWeight = FontWeight.Bold,
                     )
 
-                    // Author / artist / status (Mihon-like info row)
                     val infoLine = buildString {
                         if (!author.isNullOrBlank()) append(author)
                         if (!artist.isNullOrBlank() && artist != author) {
@@ -185,7 +188,6 @@ data class MergedMangaScreen(
                         )
                     }
 
-                    // Expandable synopsis (like Mihon)
                     if (!synopsis.isNullOrEmpty()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Column(
@@ -210,7 +212,6 @@ data class MergedMangaScreen(
                         }
                     }
 
-                    // Scanlation (vision: separate at bottom of header)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = if (!scanlation.isNullOrBlank()) {
@@ -223,6 +224,22 @@ data class MergedMangaScreen(
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
+
+                    // Vision: MAL ↔ cohesive bridge
+                    if (malId != null && malId > 0) {
+                        OutlinedButton(
+                            onClick = {
+                                val url = "https://myanimelist.net/manga/$malId"
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(url)),
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Open on MyAnimeList")
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
 
                     Button(
                         onClick = { viewModel.relink() },
