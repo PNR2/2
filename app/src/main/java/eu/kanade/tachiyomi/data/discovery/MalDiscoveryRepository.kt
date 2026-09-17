@@ -78,8 +78,12 @@ class MalDiscoveryRepository {
                             MalDiscoveryItem(
                                 malId = cursor.getLong(cursor.getColumnIndexOrThrow("mal_id")),
                                 title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
-                                coverUrl = cursor.getString(cursor.getColumnIndexOrThrow("cover_url")),
-                                synopsis = cursor.getString(cursor.getColumnIndexOrThrow("synopsis")),
+                                coverUrl = cursor.getString(
+                                    cursor.getColumnIndexOrThrow("cover_url"),
+                                ),
+                                synopsis = cursor.getString(
+                                    cursor.getColumnIndexOrThrow("synopsis"),
+                                ),
                                 score = if (scoreIdx >= 0 && !cursor.isNull(scoreIdx)) {
                                     cursor.getDouble(scoreIdx)
                                 } else {
@@ -133,13 +137,20 @@ class MalDiscoveryRepository {
         }
     }
 
+    /**
+     * Replace entire seasonal list so filters actually change what you see.
+     */
     suspend fun insertSeasonalManga(mangaList: List<MalDiscoveryItem>) {
         try {
             val db = dbHelper.writableDatabase
             val currentTime = System.currentTimeMillis()
             db.beginTransaction()
             try {
+                // Clear old seasonal so Apply filter replaces the grid
+                db.delete("mal_discovery_entry", "is_seasonal = 1", null)
+
                 mangaList.forEach { manga ->
+                    if (manga.malId <= 0) return@forEach
                     val values = ContentValues().apply {
                         put("mal_id", manga.malId)
                         put("title", manga.title)
@@ -147,7 +158,7 @@ class MalDiscoveryRepository {
                         put("synopsis", manga.synopsis)
                         put("score", manga.score)
                         put("start_date", manga.startDate)
-                        put("is_seasonal", if (manga.isSeasonal) 1 else 0)
+                        put("is_seasonal", 1)
                         put("last_synced", currentTime)
                         put("source_id", manga.sourceId)
                         put("manga_url", manga.mangaUrl)
