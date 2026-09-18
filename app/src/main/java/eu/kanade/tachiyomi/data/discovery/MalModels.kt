@@ -17,15 +17,6 @@ data class JikanPagination(
     val hasNextPage: Boolean = false,
     @SerialName("current_page")
     val currentPage: Int = 1,
-    val items: JikanPaginationItems? = null,
-)
-
-@Serializable
-data class JikanPaginationItems(
-    val count: Int = 0,
-    val total: Int = 0,
-    @SerialName("per_page")
-    val perPage: Int = 25,
 )
 
 @Serializable
