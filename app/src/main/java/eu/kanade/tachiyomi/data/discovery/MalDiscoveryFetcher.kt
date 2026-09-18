@@ -16,7 +16,7 @@ class MalDiscoveryFetcher {
         year: Int? = null,
         month: Int? = null,
         status: String? = null,
-        genres: String? = null
+        genres: String? = null,
     ): List<MalDiscoveryItem> {
         // We strictly use Jikan v4 manga search endpoint. No Client ID required.
         val urlBuilder = "https://api.jikan.moe/v4/manga".toHttpUrl().newBuilder()
@@ -25,7 +25,7 @@ class MalDiscoveryFetcher {
         if (year != null && year > 0) {
             val targetMonth = if (month != null && month in 1..12) month else 1
             val endMonth = if (month != null && month in 1..12) month else 12
-            
+
             // Calculate last day of the end month
             val lastDay = when (endMonth) {
                 4, 6, 9, 11 -> "30"
@@ -65,20 +65,20 @@ class MalDiscoveryFetcher {
 
         val bodyString = response.body?.string() ?: return emptyList()
         val jsonRoot = JSONObject(bodyString)
-        
+
         if (!jsonRoot.has("data")) return emptyList()
         val dataArray = jsonRoot.getJSONArray("data")
 
         val results = mutableListOf<MalDiscoveryItem>()
-        
+
         for (i in 0 until dataArray.length()) {
             val itemObj = dataArray.getJSONObject(i)
-            
+
             val malId = itemObj.optLong("mal_id", -1L)
             if (malId <= 0) continue
-            
+
             val title = itemObj.optString("title", "Unknown Title")
-            
+
             // Safely extract the JPG image URL
             var coverUrl = ""
             val imagesObj = itemObj.optJSONObject("images")
@@ -100,8 +100,8 @@ class MalDiscoveryFetcher {
                     coverUrl = coverUrl,
                     score = score,
                     chapters = chapters,
-                    synopsis = synopsis
-                )
+                    synopsis = synopsis,
+                ),
             )
         }
 
