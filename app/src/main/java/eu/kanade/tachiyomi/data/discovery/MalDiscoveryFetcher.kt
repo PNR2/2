@@ -7,10 +7,15 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.util.Calendar
+import java.util.concurrent.TimeUnit
 
 class MalDiscoveryFetcher {
 
-    private val client = OkHttpClient()
+    // Give Jikan up to 30 seconds to reply instead of the default 10 seconds
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
 
     fun fetchSeasonalManga(
         year: Int? = null,
@@ -47,9 +52,10 @@ class MalDiscoveryFetcher {
             urlBuilder.addQueryParameter("genres", genres)
         }
 
-        // Sort by score or members to surface the most relevant titles for that date
-        urlBuilder.addQueryParameter("order_by", "score")
+        // Sort by members (popularity) because it is heavily cached by Jikan and prevents 504 errors
+        urlBuilder.addQueryParameter("order_by", "members")
         urlBuilder.addQueryParameter("sort", "desc")
+        
         // Get a healthy amount of results, Jikan limit is 25 per page by default
         urlBuilder.addQueryParameter("limit", "25")
 
