@@ -202,8 +202,9 @@ object NewsTab : eu.kanade.presentation.util.Tab {
                         realCount == 0 -> "0 titles for this filter (or API empty)"
                         year == null && month == null -> "Loaded $realCount titles (any date)"
                         year != null && month == null -> "Loaded $realCount titles for $year"
-                        else -> "Loaded $realCount titles for " +
-                            "${month.toString().padStart(2, '0')}/$year"
+                        else ->
+                            "Loaded $realCount titles for " +
+                                "${month.toString().padStart(2, '0')}/$year"
                     }
                 } catch (e: Exception) {
                     seasonalStatus = "Error: ${e.message}"
