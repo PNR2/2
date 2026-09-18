@@ -186,7 +186,7 @@ object NewsTab : eu.kanade.presentation.util.Tab {
         fun applySeasonalFilter() {
             if (seasonalLoading) return
             seasonalLoading = true
-            seasonalStatus = "Loading seasonal manga…"
+            seasonalStatus = "Loading from MAL (Jikan)… this can take up to 1 min"
             coroutineScope.launch {
                 try {
                     val year = filterYear.takeIf { it > 0 }
@@ -197,10 +197,13 @@ object NewsTab : eu.kanade.presentation.util.Tab {
                     withContext(Dispatchers.IO) {
                         malRepo.insertSeasonalManga(list)
                     }
+                    val realCount = list.count { it.malId > 0 }
                     seasonalStatus = when {
-                        year == null && month == null -> "Showing: Any date"
-                        year != null && month == null -> "Showing: $year (any month)"
-                        else -> "Showing: ${month.toString().padStart(2, '0')}/$year"
+                        realCount == 0 -> "0 titles for this filter (or API empty)"
+                        year == null && month == null -> "Loaded $realCount titles (any date)"
+                        year != null && month == null -> "Loaded $realCount titles for $year"
+                        else -> "Loaded $realCount titles for " +
+                            "${month.toString().padStart(2, '0')}/$year"
                     }
                 } catch (e: Exception) {
                     seasonalStatus = "Error: ${e.message}"
