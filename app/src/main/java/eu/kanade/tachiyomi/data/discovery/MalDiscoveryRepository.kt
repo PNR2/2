@@ -138,7 +138,7 @@ class MalDiscoveryRepository {
     }
 
     /**
-     * Replace entire seasonal list so filters actually change what you see.
+     * REPLACE seasonal list completely so filters change what you see.
      */
     suspend fun insertSeasonalManga(mangaList: List<MalDiscoveryItem>) {
         try {
@@ -146,11 +146,10 @@ class MalDiscoveryRepository {
             val currentTime = System.currentTimeMillis()
             db.beginTransaction()
             try {
-                // Clear old seasonal so Apply filter replaces the grid
                 db.delete("mal_discovery_entry", "is_seasonal = 1", null)
 
                 mangaList.forEach { manga ->
-                    if (manga.malId <= 0) return@forEach
+                    if (manga.malId == 0L) return@forEach
                     val values = ContentValues().apply {
                         put("mal_id", manga.malId)
                         put("title", manga.title)
