@@ -8,7 +8,10 @@ import kotlinx.coroutines.flow.asStateFlow
 
 // Restoring the missing enum that was deleted!
 enum class DiscoverySort {
-    LATEST, SCORE, CHAPTERS, TITLE
+    LATEST,
+    SCORE,
+    CHAPTERS,
+    TITLE,
 }
 
 class MalDiscoveryRepository {
