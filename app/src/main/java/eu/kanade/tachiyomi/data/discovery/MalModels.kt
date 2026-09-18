@@ -5,7 +5,27 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class JikanMangaResponse(
+    val pagination: JikanPagination? = null,
     val data: List<JikanMangaData> = emptyList(),
+)
+
+@Serializable
+data class JikanPagination(
+    @SerialName("last_visible_page")
+    val lastVisiblePage: Int = 1,
+    @SerialName("has_next_page")
+    val hasNextPage: Boolean = false,
+    @SerialName("current_page")
+    val currentPage: Int = 1,
+    val items: JikanPaginationItems? = null,
+)
+
+@Serializable
+data class JikanPaginationItems(
+    val count: Int = 0,
+    val total: Int = 0,
+    @SerialName("per_page")
+    val perPage: Int = 25,
 )
 
 @Serializable
@@ -72,10 +92,8 @@ data class MalDiscoveryItem(
     val score: Double?,
     val startDate: String?,
     val isSeasonal: Boolean,
-    // Auto-Link fields
     val sourceId: Long? = null,
     val mangaUrl: String? = null,
-    // Extra useful data
     val chapters: Int? = null,
     val status: String? = null,
     val authors: String? = null,
