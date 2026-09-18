@@ -48,7 +48,7 @@ class MalDiscoveryRepository {
     }
 
     fun insertSeasonalManga(items: List<MalDiscoveryItem>) {
-        // Enforcing Rule 10 & 11: We completely wipe the old state. 
+        // Enforcing Rule 10 & 11: We completely wipe the old state.
         // If 'items' is empty, it correctly clears the UI.
         _seasonalMangaFlow.value = applySortLogic(items, currentSort)
     }
