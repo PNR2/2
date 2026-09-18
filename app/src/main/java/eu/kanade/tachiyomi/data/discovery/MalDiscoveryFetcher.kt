@@ -11,6 +11,13 @@ import okhttp3.Request
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
+/**
+ * MAL / Jikan seasonal (and filtered) manga loader.
+ *
+ * - Jikan max = 25 per page → we page until has_next_page ends or MAX_PAGES
+ * - When year/month set: NEVER fall back to "top publishing" (that was Berserk/One Piece)
+ * - Client-side check on published.from so wrong titles are dropped
+ */
 class MalDiscoveryFetcher {
 
     private val client = OkHttpClient.Builder()
@@ -24,54 +31,79 @@ class MalDiscoveryFetcher {
         isLenient = true
     }
 
-    /**
-     * Fetches manga list from Jikan.
-     * year/month null = Any (no date filter).
-     * Uses full month date range + multiple pages so list is not stuck at 0–few items.
-     */
     suspend fun fetchSeasonalManga(
         year: Int? = null,
         month: Int? = null,
     ): List<MalDiscoveryItem> {
         return withContext(Dispatchers.IO) {
             val collected = linkedMapOf<Long, MalDiscoveryItem>()
+            val baseUrl = buildPrimaryUrl(year, month)
+            val dateFilterActive = year != null || month != null
 
-            val urls = buildUrlList(year, month)
-            for ((index, baseUrl) in urls.withIndex()) {
-                if (index > 0) delay(1000)
-                // Up to 3 pages per strategy (25 * 3 = 75)
-                for (page in 1..3) {
-                    try {
-                        if (page > 1) delay(400)
-                        val url = if (baseUrl.contains("?")) {
-                            "$baseUrl&page=$page"
-                        } else {
-                            "$baseUrl?page=$page"
+            var page = 1
+            var hasNext = true
+
+            while (hasNext && page <= MAX_PAGES) {
+                try {
+                    if (page > 1) delay(PAGE_DELAY_MS)
+
+                    val url = "$baseUrl&page=$page"
+                    val (items, pagination) = fetchPage(url)
+
+                    items.forEach { item ->
+                        if (item.malId <= 0) return@forEach
+                        if (dateFilterActive && !matchesDateFilter(item.startDate, year, month)) {
+                            return@forEach
                         }
-                        val batch = fetchPage(url)
-                        if (batch.isEmpty()) break
-                        batch.forEach { item ->
-                            if (item.malId > 0) {
-                                collected[item.malId] = item
-                            }
-                        }
-                    } catch (_: Exception) {
-                        break
+                        collected[item.malId] = item
                     }
+
+                    hasNext = pagination?.hasNextPage == true
+                    page++
+                } catch (_: Exception) {
+                    break
                 }
-                // Prefer first strategy that returned data
-                if (collected.isNotEmpty()) break
+            }
+
+            // Only if NO date filter: optional second strategy if still empty
+            if (collected.isEmpty() && !dateFilterActive) {
+                try {
+                    val fallback =
+                        "https://api.jikan.moe/v4/manga?status=publishing&type=manga&order_by=score&sort=desc&limit=25&sfw=true"
+                    var p = 1
+                    var next = true
+                    while (next && p <= MAX_PAGES) {
+                        if (p > 1) delay(PAGE_DELAY_MS)
+                        val (items, pagination) = fetchPage("$fallback&page=$p")
+                        items.forEach { item ->
+                            if (item.malId > 0) collected[item.malId] = item
+                        }
+                        next = pagination?.hasNextPage == true
+                        p++
+                    }
+                } catch (_: Exception) {
+                }
             }
 
             if (collected.isEmpty()) {
                 listOf(
                     MalDiscoveryItem(
                         malId = -999,
-                        title = "Could not load seasonal manga",
+                        title = if (dateFilterActive) {
+                            "No manga for this date filter"
+                        } else {
+                            "Could not load manga"
+                        },
                         coverUrl = null,
-                        synopsis = "Jikan API failed or rate-limited. Wait a minute and Apply filter again.",
+                        synopsis = if (dateFilterActive) {
+                            "Jikan returned no titles for the selected month/year, " +
+                                "or the API rate-limited. Try Any month, another year, " +
+                                "or wait ~30s and Apply again."
+                        } else {
+                            "Jikan API failed. Wait and try Apply filter again."
+                        },
                         score = 0.0,
-                        startDate = "Error",
+                        startDate = "Empty",
                         isSeasonal = true,
                     ),
                 )
@@ -81,7 +113,29 @@ class MalDiscoveryFetcher {
         }
     }
 
-    private fun fetchPage(url: String): List<MalDiscoveryItem> {
+    private fun buildPrimaryUrl(year: Int?, month: Int?): String {
+        val base = "https://api.jikan.moe/v4/manga?type=manga&limit=25&sfw=true"
+
+        return when {
+            year != null && month != null && month in 1..12 -> {
+                val start = String.format("%04d-%02d-01", year, month)
+                val endDay = lastDayOfMonth(year, month)
+                val end = String.format("%04d-%02d-%02d", year, month, endDay)
+                // order by start_date = closer to MAL "new this month"
+                "$base&start_date=$start&end_date=$end&order_by=start_date&sort=desc"
+            }
+            year != null && month == null -> {
+                val start = String.format("%04d-01-01", year)
+                val end = String.format("%04d-12-31", year)
+                "$base&start_date=$start&end_date=$end&order_by=start_date&sort=desc"
+            }
+            else -> {
+                "$base&status=publishing&order_by=score&sort=desc"
+            }
+        }
+    }
+
+    private fun fetchPage(url: String): Pair<List<MalDiscoveryItem>, JikanPagination?> {
         val request = Request.Builder()
             .url(url)
             .header(
@@ -94,73 +148,69 @@ class MalDiscoveryFetcher {
 
         val response = client.newCall(request).execute()
         val body = response.body?.string()
-        if (!response.isSuccessful || body.isNullOrEmpty()) return emptyList()
+        if (!response.isSuccessful || body.isNullOrEmpty()) {
+            return emptyList<MalDiscoveryItem>() to null
+        }
 
         val parsed = json.decodeFromString<JikanMangaResponse>(body)
-        return parsed.data.map { item ->
-            val image = item.images?.jpg?.largeImageUrl
-                ?: item.images?.jpg?.imageUrl
-                ?: item.images?.webp?.largeImageUrl
-                ?: item.images?.webp?.imageUrl
-
-            val altTitles = mutableListOf<String>()
-            item.titleEnglish?.let { altTitles.add(it) }
-            item.titleJapanese?.let { altTitles.add(it) }
-            item.titles?.forEach { t ->
-                t.title?.let { altTitles.add(it) }
-            }
-
-            val authors = item.authors
-                ?.mapNotNull { it.name }
-                ?.joinToString(", ")
-
-            val genres = item.genres
-                ?.mapNotNull { it.name }
-                ?.joinToString(", ")
-
-            MalDiscoveryItem(
-                malId = item.malId,
-                title = item.title,
-                coverUrl = image,
-                synopsis = item.synopsis,
-                score = item.score,
-                startDate = item.published?.from,
-                isSeasonal = true,
-                chapters = item.chapters,
-                status = item.status,
-                authors = authors,
-                genres = genres,
-                alternativeTitles = altTitles.distinct(),
-            )
-        }
+        val items = parsed.data.map { item -> mapItem(item) }
+        return items to parsed.pagination
     }
 
-    private fun buildUrlList(year: Int?, month: Int?): List<String> {
-        val typeAndOrder = "type=manga&order_by=score&sort=desc&limit=25&sfw=true"
+    private fun mapItem(item: JikanMangaData): MalDiscoveryItem {
+        val image = item.images?.jpg?.largeImageUrl
+            ?: item.images?.jpg?.imageUrl
+            ?: item.images?.webp?.largeImageUrl
+            ?: item.images?.webp?.imageUrl
 
-        val primary = when {
-            year != null && month != null && month in 1..12 -> {
-                val start = String.format("%04d-%02d-01", year, month)
-                val endDay = lastDayOfMonth(year, month)
-                val end = String.format("%04d-%02d-%02d", year, month, endDay)
-                // Full month range (not bare YYYY-MM which returns almost nothing)
-                "https://api.jikan.moe/v4/manga?start_date=$start&end_date=$end&$typeAndOrder"
-            }
-            year != null && month == null -> {
-                val start = String.format("%04d-01-01", year)
-                val end = String.format("%04d-12-31", year)
-                "https://api.jikan.moe/v4/manga?start_date=$start&end_date=$end&$typeAndOrder"
-            }
-            else -> {
-                "https://api.jikan.moe/v4/manga?status=publishing&$typeAndOrder"
-            }
+        val altTitles = mutableListOf<String>()
+        item.titleEnglish?.let { altTitles.add(it) }
+        item.titleJapanese?.let { altTitles.add(it) }
+        item.titles?.forEach { t ->
+            t.title?.let { altTitles.add(it) }
         }
 
-        return listOf(
-            primary,
-            "https://api.jikan.moe/v4/manga?status=publishing&$typeAndOrder",
-            "https://api.jikan.moe/v4/top/manga?filter=publishing&limit=25",
-        ).distinct()
+        val authors = item.authors
+            ?.mapNotNull { it.name }
+            ?.joinToString(", ")
+
+        val genres = item.genres
+            ?.mapNotNull { it.name }
+            ?.joinToString(", ")
+
+        return MalDiscoveryItem(
+            malId = item.malId,
+            title = item.title,
+            coverUrl = image,
+            synopsis = item.synopsis,
+            score = item.score,
+            startDate = item.published?.from,
+            isSeasonal = true,
+            chapters = item.chapters,
+            status = item.status,
+            authors = authors,
+            genres = genres,
+            alternativeTitles = altTitles.distinct(),
+        )
+    }
+
+    /**
+     * published.from is ISO like 2026-02-15T00:00:00+00:00
+     */
+    private fun matchesDateFilter(
+        publishedFrom: String?,
+        year: Int?,
+        month: Int?,
+    ): Boolean {
+        if (publishedFrom.isNullOrBlank()) return false
+        // Take YYYY-MM-DD prefix
+        val datePart = publishedFrom.take(10)
+        if (datePart.length < 7) return false
+        val y = datePart.substring(0, 4).toIntOrNull() ?: return false
+        val m = datePart.substring(5, 7).toIntOrNull() ?: return false
+        if (year != null && y != year) return false
+        if (month != null && month in 1..12 && m != month) return false
+        return true
     }
 
     private fun lastDayOfMonth(year: Int, month: Int): Int {
@@ -171,6 +221,12 @@ class MalDiscoveryFetcher {
     }
 
     companion object {
+        /** 25 * 40 = up to 1000 titles (Jikan page size is max 25) */
+        private const val MAX_PAGES = 40
+
+        /** Stay under ~3 requests/second */
+        private const val PAGE_DELAY_MS = 400L
+
         fun currentYear(): Int = Calendar.getInstance().get(Calendar.YEAR)
 
         fun currentMonth(): Int = Calendar.getInstance().get(Calendar.MONTH) + 1
