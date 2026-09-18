@@ -6,6 +6,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+// Restoring the missing enum that was deleted!
+enum class DiscoverySort {
+    LATEST, SCORE, CHAPTERS, TITLE
+}
+
 class MalDiscoveryRepository {
 
     companion object {
