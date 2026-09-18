@@ -55,7 +55,7 @@ class MalDiscoveryFetcher {
         // Sort by members (popularity) because it is heavily cached by Jikan and prevents 504 errors
         urlBuilder.addQueryParameter("order_by", "members")
         urlBuilder.addQueryParameter("sort", "desc")
-        
+
         // Get a healthy amount of results, Jikan limit is 25 per page by default
         urlBuilder.addQueryParameter("limit", "25")
 
