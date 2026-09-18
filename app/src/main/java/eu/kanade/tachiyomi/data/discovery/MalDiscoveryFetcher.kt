@@ -93,6 +93,11 @@ class MalDiscoveryFetcher {
             val chapters = itemObj.optInt("chapters", 0)
             val synopsis = itemObj.optString("synopsis", "")
 
+            // Extract the start date from Jikan for the missing parameter
+            val publishedObj = itemObj.optJSONObject("published")
+            val startDateStr = publishedObj?.optString("from") ?: ""
+            val statusStr = itemObj.optString("status", "")
+
             results.add(
                 MalDiscoveryItem(
                     malId = malId,
@@ -101,6 +106,13 @@ class MalDiscoveryFetcher {
                     score = score,
                     chapters = chapters,
                     synopsis = synopsis,
+                    startDate = startDateStr,
+                    isSeasonal = true,
+                    sourceId = null,
+                    mangaUrl = null,
+                    status = statusStr,
+                    authors = null,
+                    genres = null,
                 ),
             )
         }
