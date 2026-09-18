@@ -10,7 +10,7 @@ class MalDiscoveryRepository {
 
     companion object {
         // Enforcing Rule 11: This strictly holds only the current filter's results.
-        private val _seasonalMangaFlow = MutableStateFlow<List<MalDiscoveryItem>>(emptyList())
+        private val seasonalMangaFlow = MutableStateFlow<List<MalDiscoveryItem>>(emptyList())
 
         private var isAutomationOn = false
         private var currentSort = DiscoverySort.SCORE
@@ -26,8 +26,8 @@ class MalDiscoveryRepository {
         fun setSortMethod(sort: DiscoverySort) {
             currentSort = sort
             // Instantly re-sort the UI without needing to re-fetch from the network
-            val currentList = _seasonalMangaFlow.value
-            _seasonalMangaFlow.value = applySortLogic(currentList, sort)
+            val currentList = seasonalMangaFlow.value
+            seasonalMangaFlow.value = applySortLogic(currentList, sort)
         }
 
         private fun applySortLogic(
@@ -44,12 +44,12 @@ class MalDiscoveryRepository {
     }
 
     fun subscribeToSeasonalManga(): Flow<List<MalDiscoveryItem>> {
-        return _seasonalMangaFlow.asStateFlow()
+        return seasonalMangaFlow.asStateFlow()
     }
 
     fun insertSeasonalManga(items: List<MalDiscoveryItem>) {
         // Enforcing Rule 10 & 11: We completely wipe the old state.
         // If 'items' is empty, it correctly clears the UI.
-        _seasonalMangaFlow.value = applySortLogic(items, currentSort)
+        seasonalMangaFlow.value = applySortLogic(items, currentSort)
     }
 }
