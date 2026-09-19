@@ -48,7 +48,7 @@ class MalDiscoveryFetcher {
             urlBuilder.addQueryParameter("genres", genres)
         }
 
-        // CRITICAL FIX: We do NOT send order_by or sort to Jikan. 
+        // CRITICAL FIX: We do NOT send order_by or sort to Jikan.
         // This stops the 504 timeout. We sort it locally in the Repository instead.
         urlBuilder.addQueryParameter("limit", "25")
 
