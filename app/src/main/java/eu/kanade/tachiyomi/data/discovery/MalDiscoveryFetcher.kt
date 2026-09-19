@@ -11,7 +11,6 @@ import java.util.concurrent.TimeUnit
 
 class MalDiscoveryFetcher {
 
-    // Give Jikan up to 30 seconds to reply instead of the default 10 seconds
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -23,15 +22,12 @@ class MalDiscoveryFetcher {
         status: String? = null,
         genres: String? = null,
     ): List<MalDiscoveryItem> {
-        // We strictly use Jikan v4 manga search endpoint. No Client ID required.
         val urlBuilder = "https://api.jikan.moe/v4/manga".toHttpUrl().newBuilder()
 
-        // Apply real start_date and end_date filters if year is provided
         if (year != null && year > 0) {
             val targetMonth = if (month != null && month in 1..12) month else 1
             val endMonth = if (month != null && month in 1..12) month else 12
 
-            // Calculate last day of the end month
             val lastDay = when (endMonth) {
                 4, 6, 9, 11 -> "30"
                 2 -> if (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) "29" else "28"
@@ -52,11 +48,8 @@ class MalDiscoveryFetcher {
             urlBuilder.addQueryParameter("genres", genres)
         }
 
-        // Sort by members (popularity) because it is heavily cached by Jikan and prevents 504 errors
-        urlBuilder.addQueryParameter("order_by", "members")
-        urlBuilder.addQueryParameter("sort", "desc")
-
-        // Get a healthy amount of results, Jikan limit is 25 per page by default
+        // CRITICAL FIX: We do NOT send order_by or sort to Jikan. 
+        // This stops the 504 timeout. We sort it locally in the Repository instead.
         urlBuilder.addQueryParameter("limit", "25")
 
         val request = Request.Builder()
@@ -79,13 +72,9 @@ class MalDiscoveryFetcher {
 
         for (i in 0 until dataArray.length()) {
             val itemObj = dataArray.getJSONObject(i)
-
             val malId = itemObj.optLong("mal_id", -1L)
             if (malId <= 0) continue
 
-            val title = itemObj.optString("title", "Unknown Title")
-
-            // Safely extract the JPG image URL
             var coverUrl = ""
             val imagesObj = itemObj.optJSONObject("images")
             if (imagesObj != null) {
@@ -95,28 +84,21 @@ class MalDiscoveryFetcher {
                 }
             }
 
-            val score = itemObj.optDouble("score", 0.0).takeIf { !it.isNaN() } ?: 0.0
-            val chapters = itemObj.optInt("chapters", 0)
-            val synopsis = itemObj.optString("synopsis", "")
-
-            // Extract the start date from Jikan for the missing parameter
             val publishedObj = itemObj.optJSONObject("published")
-            val startDateStr = publishedObj?.optString("from") ?: ""
-            val statusStr = itemObj.optString("status", "")
 
             results.add(
                 MalDiscoveryItem(
                     malId = malId,
-                    title = title,
+                    title = itemObj.optString("title", "Unknown Title"),
                     coverUrl = coverUrl,
-                    score = score,
-                    chapters = chapters,
-                    synopsis = synopsis,
-                    startDate = startDateStr,
+                    score = itemObj.optDouble("score", 0.0).takeIf { !it.isNaN() } ?: 0.0,
+                    chapters = itemObj.optInt("chapters", 0),
+                    synopsis = itemObj.optString("synopsis", ""),
+                    startDate = publishedObj?.optString("from") ?: "",
                     isSeasonal = true,
                     sourceId = null,
                     mangaUrl = null,
-                    status = statusStr,
+                    status = itemObj.optString("status", ""),
                     authors = null,
                     genres = null,
                 ),
