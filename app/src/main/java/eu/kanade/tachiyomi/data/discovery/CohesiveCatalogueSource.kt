@@ -28,7 +28,7 @@ class CohesiveCatalogueSource(
 
         // Phase 1: Fast Shallow Search via the Manager
         val outcome = mergedManager.searchCohesive(query = query)
-        
+
         val results = mutableListOf<SManga>()
 
         // Card 1: Primary Match
@@ -39,7 +39,7 @@ class CohesiveCatalogueSource(
                 initialized = false
             }
             results.add(primary)
-            
+
             // Phase 2: Intent-based auto-harvest (Triggers in background)
             MergedMangaManager.ensureBackground(mergedManager, query)
         }
