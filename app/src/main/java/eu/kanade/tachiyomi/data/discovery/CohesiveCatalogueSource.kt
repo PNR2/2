@@ -3,8 +3,10 @@ package eu.kanade.tachiyomi.data.discovery
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
+import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import kotlinx.coroutines.runBlocking
+import rx.Observable
 
 /**
  * The Phantom Source. Injects Cohesive Manga directly into Mihon's native Global Search.
@@ -62,13 +64,27 @@ class CohesiveCatalogueSource(
         return MangasPage(emptyList(), false)
     }
 
-    override suspend fun getMangaDetails(manga: SManga): SManga {
-        // Will map SQLite merged_manga details here in the next vertical
-        return manga
+    override fun getFilterList(): FilterList {
+        return FilterList()
     }
 
-    override suspend fun getChapterList(manga: SManga): List<eu.kanade.tachiyomi.source.model.SChapter> {
+    @Suppress("DEPRECATION")
+    @Deprecated("Use the 1.x API instead")
+    override fun fetchMangaDetails(manga: SManga): Observable<SManga> {
+        // Will map SQLite merged_manga details here in the next vertical
+        return Observable.just(manga)
+    }
+
+    @Suppress("DEPRECATION")
+    @Deprecated("Use the 1.x API instead")
+    override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
         // Will stream SQLite merged_chapter lists here in the next vertical
-        return emptyList()
+        return Observable.just(emptyList())
+    }
+
+    @Suppress("DEPRECATION")
+    @Deprecated("Use the 1.x API instead")
+    override fun fetchPageList(chapter: SChapter): Observable<List<Page>> {
+        return Observable.just(emptyList())
     }
 }
