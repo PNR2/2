@@ -6,6 +6,8 @@ import androidx.compose.runtime.produceState
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import eu.kanade.domain.source.service.SourcePreferences
+import eu.kanade.tachiyomi.data.discovery.CohesiveCatalogueSource
+import eu.kanade.tachiyomi.data.discovery.MergedMangaManager
 import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.source.Source
 import kotlinx.coroutines.Job
@@ -61,9 +63,15 @@ abstract class SearchViewModel(
 
     protected var extensionFilter: String? = null
 
+    // Instantiate the Phantom Source directly to avoid DI signature changes
+    private val cohesiveSource by lazy {
+        CohesiveCatalogueSource(MergedMangaManager(sourceManager))
+    }
+
     open val sortComparator = { map: Map<Source, SearchItemResult> ->
         compareBy<Source>(
             { (map[it] as? SearchItemResult.Success)?.isEmpty ?: true },
+            { it.id != 696969L }, // Forces Cohesive Manga (696969L) to the very top if it has results
             { "${it.id}" !in pinnedSources },
             { "${it.name.lowercase()} (${it.lang})" },
         )
@@ -89,7 +97,7 @@ abstract class SearchViewModel(
     }
 
     open fun getEnabledSources(): List<Source> {
-        return sourceManager.getAll()
+        val normalSources = sourceManager.getAll()
             .filter { it.lang in enabledLanguages && "${it.id}" !in disabledSources }
             .sortedWith(
                 compareBy(
@@ -97,6 +105,9 @@ abstract class SearchViewModel(
                     { "${it.name.lowercase()} (${it.lang})" },
                 ),
             )
+        
+        // Prepend Cohesive Source so it is always queried first
+        return listOf(cohesiveSource) + normalSources
     }
 
     private suspend fun getSelectedSources(): List<Source> {
