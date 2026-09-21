@@ -4,6 +4,8 @@ import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import eu.kanade.tachiyomi.data.discovery.CohesiveCatalogueSource
+import eu.kanade.tachiyomi.data.discovery.MergedMangaManager
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.source.online.HttpSource
@@ -45,6 +47,11 @@ class AndroidSourceManager(
 
     override val sources: Flow<List<Source>> = sourcesMapFlow.map { it.values.toList() }
 
+    // Inject the Phantom Source locally
+    private val cohesiveSource by lazy {
+        CohesiveCatalogueSource(MergedMangaManager(this))
+    }
+
     init {
         scope.launch {
             extensionManager.installedExtensionsFlow
@@ -74,11 +81,15 @@ class AndroidSourceManager(
         }
     }
 
+    // Intercept our fake ID before Mihon throws a "Source not found" error
     override fun get(sourceKey: Long): Source? {
+        if (sourceKey == 696969L) return cohesiveSource
         return sourcesMapFlow.value[sourceKey]
     }
 
+    // Intercept our fake ID for stub requests
     override fun getOrStub(sourceKey: Long): Source {
+        if (sourceKey == 696969L) return cohesiveSource
         return sourcesMapFlow.value[sourceKey] ?: stubSourcesMap.getOrPut(sourceKey) {
             runBlocking { createStubSource(sourceKey) }
         }
