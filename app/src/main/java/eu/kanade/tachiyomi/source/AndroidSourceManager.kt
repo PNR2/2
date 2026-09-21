@@ -59,7 +59,7 @@ class AndroidSourceManager(
                     val mutableMap = ConcurrentHashMap<Long, Source>(
                         mapOf(
                             LocalSource.ID to localSource,
-                            696969L to cohesiveSource
+                            696969L to cohesiveSource,
                         ),
                     )
                     extensions.forEach { extension ->
