@@ -22,6 +22,9 @@ class CohesiveCatalogueSource(
     override val lang: String = "multi"
     override val supportsLatest: Boolean = false
 
+    // CRITICAL FIX: Stops the ugly class path from showing in the UI
+    override fun toString(): String = name
+
     override suspend fun getPopularManga(page: Int): MangasPage {
         return MangasPage(emptyList(), false)
     }
@@ -67,14 +70,29 @@ class CohesiveCatalogueSource(
     @Deprecated("Use the 1.x API instead")
     override fun fetchMangaDetails(manga: SManga): Observable<SManga> {
         return Observable.fromCallable {
-            val dbId = manga.url.toLongOrNull() ?: return@fromCallable manga
-            val merged = repository.getMergedMangaById(dbId) ?: return@fromCallable manga
+            val dbId = manga.url.toLongOrNull()
+            
+            // DIAGNOSTIC 1: Did the ID pass correctly?
+            if (dbId == null) {
+                manga.description = "⚙️ ERROR: URL '${manga.url}' is not a valid Database ID."
+                manga.initialized = true
+                return@fromCallable manga
+            }
+
+            val merged = repository.getMergedMangaById(dbId)
+            
+            // DIAGNOSTIC 2: Did the Manager actually save it to SQLite?
+            if (merged == null) {
+                manga.description = "⚙️ ERROR: Database ID $dbId not found in SQLite. Manager failed to save it."
+                manga.initialized = true
+                return@fromCallable manga
+            }
 
             manga.apply {
                 title = merged.title
-                author = merged.author
-                artist = merged.artist
-                description = merged.synopsis
+                author = merged.author ?: "Unknown Author"
+                artist = merged.artist ?: "Unknown Artist"
+                description = merged.synopsis ?: "Fetching cohesive metadata in the background..."
                 genre = merged.genres
                 status = when (merged.status?.lowercase()) {
                     "ongoing" -> SManga.ONGOING
@@ -83,7 +101,7 @@ class CohesiveCatalogueSource(
                     "on hiatus" -> SManga.ON_HIATUS
                     else -> SManga.UNKNOWN
                 }
-                thumbnail_url = merged.coverUrl ?: merged.allCovers().firstOrNull()
+                thumbnail_url = merged.coverUrl ?: merged.allCovers().firstOrNull() ?: manga.thumbnail_url
                 initialized = true
             }
             manga
@@ -96,6 +114,16 @@ class CohesiveCatalogueSource(
         return Observable.fromCallable {
             val dbId = manga.url.toLongOrNull() ?: return@fromCallable emptyList<SChapter>()
             val dbChapters = repository.getChapters(dbId)
+            
+            // DIAGNOSTIC 3: Show a visual indicator that the app is trying
+            if (dbChapters.isEmpty()) {
+                val dummy = SChapter.create().apply {
+                    url = "dummy"
+                    name = "⚙️ Background harvester running... Pull to refresh soon."
+                    chapter_number = -1f
+                }
+                return@fromCallable listOf(dummy)
+            }
 
             dbChapters.map { ch ->
                 SChapter.create().apply {
@@ -103,7 +131,6 @@ class CohesiveCatalogueSource(
                     name = ch.name
                     chapter_number = ch.chapterNumber
                     date_upload = ch.dateUpload
-                    // Use scanlator field to show which language/source this chapter belongs to
                     scanlator = ch.language ?: "Multi"
                 }
             }.sortedByDescending { it.chapter_number }
