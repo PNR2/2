@@ -15,7 +15,8 @@ class CohesiveCatalogueSource(
     private val mergedManager: MergedMangaManager,
 ) : CatalogueSource {
 
-    // Hardcoded ID to ensure it stays consistent and doesn't conflict with real extensions
+    private val repository = MergedMangaRepository()
+
     override val id: Long = 696969L
     override val name: String = "Cohesive Manga"
     override val lang: String = "multi"
@@ -28,25 +29,19 @@ class CohesiveCatalogueSource(
     override suspend fun getSearchManga(page: Int, query: String, filters: FilterList): MangasPage {
         if (query.isBlank()) return MangasPage(emptyList(), false)
 
-        // Phase 1: Fast Shallow Search via the Manager
         val outcome = mergedManager.searchCohesive(query = query)
-
         val results = mutableListOf<SManga>()
 
-        // Card 1: Primary Match
         if (outcome.primaryId > 0) {
             val primary = SManga.create().apply {
                 title = outcome.primaryTitle
-                url = outcome.primaryId.toString() // We pass the DB ID as the URL
+                url = outcome.primaryId.toString()
                 initialized = false
             }
             results.add(primary)
-
-            // Phase 2: Intent-based auto-harvest (Triggers in background)
             MergedMangaManager.ensureBackground(mergedManager, query)
         }
 
-        // Cards 2+: Similar Matches
         outcome.similar.forEach { similarItem ->
             val similar = SManga.create().apply {
                 title = similarItem.title
@@ -71,15 +66,48 @@ class CohesiveCatalogueSource(
     @Suppress("DEPRECATION")
     @Deprecated("Use the 1.x API instead")
     override fun fetchMangaDetails(manga: SManga): Observable<SManga> {
-        // Will map SQLite merged_manga details here in the next vertical
-        return Observable.just(manga)
+        return Observable.fromCallable {
+            val dbId = manga.url.toLongOrNull() ?: return@fromCallable manga
+            val merged = repository.getMergedMangaById(dbId) ?: return@fromCallable manga
+
+            manga.apply {
+                title = merged.title
+                author = merged.author
+                artist = merged.artist
+                description = merged.synopsis
+                genre = merged.genres
+                status = when (merged.status?.lowercase()) {
+                    "ongoing" -> SManga.ONGOING
+                    "completed" -> SManga.COMPLETED
+                    "cancelled" -> SManga.CANCELLED
+                    "on hiatus" -> SManga.ON_HIATUS
+                    else -> SManga.UNKNOWN
+                }
+                thumbnail_url = merged.coverUrl ?: merged.allCovers().firstOrNull()
+                initialized = true
+            }
+            manga
+        }
     }
 
     @Suppress("DEPRECATION")
     @Deprecated("Use the 1.x API instead")
     override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
-        // Will stream SQLite merged_chapter lists here in the next vertical
-        return Observable.just(emptyList())
+        return Observable.fromCallable {
+            val dbId = manga.url.toLongOrNull() ?: return@fromCallable emptyList<SChapter>()
+            val dbChapters = repository.getChapters(dbId)
+
+            dbChapters.map { ch ->
+                SChapter.create().apply {
+                    url = ch.url
+                    name = ch.name
+                    chapter_number = ch.chapterNumber
+                    date_upload = ch.dateUpload
+                    // Use scanlator field to show which language/source this chapter belongs to
+                    scanlator = ch.language ?: "Multi"
+                }
+            }.sortedByDescending { it.chapter_number }
+        }
     }
 
     @Suppress("DEPRECATION")
