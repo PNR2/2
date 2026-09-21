@@ -47,7 +47,6 @@ class AndroidSourceManager(
 
     override val sources: Flow<List<Source>> = sourcesMapFlow.map { it.values.toList() }
 
-    // Inject the Phantom Source locally
     private val cohesiveSource by lazy {
         CohesiveCatalogueSource(MergedMangaManager(this))
     }
@@ -56,8 +55,12 @@ class AndroidSourceManager(
         scope.launch {
             extensionManager.installedExtensionsFlow
                 .collectLatest { extensions ->
+                    // CRITICAL FIX: Inject 696969L directly into the native map so the Flow recognizes it
                     val mutableMap = ConcurrentHashMap<Long, Source>(
-                        mapOf(LocalSource.ID to localSource),
+                        mapOf(
+                            LocalSource.ID to localSource,
+                            696969L to cohesiveSource
+                        ),
                     )
                     extensions.forEach { extension ->
                         extension.sources.forEach {
@@ -81,15 +84,11 @@ class AndroidSourceManager(
         }
     }
 
-    // Intercept our fake ID before Mihon throws a "Source not found" error
     override fun get(sourceKey: Long): Source? {
-        if (sourceKey == 696969L) return cohesiveSource
         return sourcesMapFlow.value[sourceKey]
     }
 
-    // Intercept our fake ID for stub requests
     override fun getOrStub(sourceKey: Long): Source {
-        if (sourceKey == 696969L) return cohesiveSource
         return sourcesMapFlow.value[sourceKey] ?: stubSourcesMap.getOrPut(sourceKey) {
             runBlocking { createStubSource(sourceKey) }
         }
