@@ -54,6 +54,7 @@ class GlobalSearchViewModel(
 
     override fun getEnabledSources(): List<Source> {
         return super.getEnabledSources()
-            .filter { state.value.sourceFilter != SourceFilter.PinnedOnly || "${it.id}" in pinnedSources }
+            // Bypass Pinned filter specifically for Cohesive Manga (696969L) so it always shows
+            .filter { state.value.sourceFilter != SourceFilter.PinnedOnly || "${it.id}" in pinnedSources || it.id == 696969L }
     }
 }
