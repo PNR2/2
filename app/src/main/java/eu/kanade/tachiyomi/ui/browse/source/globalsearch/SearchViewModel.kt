@@ -105,7 +105,7 @@ abstract class SearchViewModel(
                     { "${it.name.lowercase()} (${it.lang})" },
                 ),
             )
-        
+
         // Prepend Cohesive Source so it is always queried first
         return listOf(cohesiveSource) + normalSources
     }
