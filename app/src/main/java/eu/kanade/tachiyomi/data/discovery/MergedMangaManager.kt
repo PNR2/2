@@ -353,7 +353,7 @@ class MergedMangaManager(
             val outcome = CohesiveSearchOutcome(primaryId, primaryTitle, similar)
             emit(SearchEvent.Finished(outcome))
 
-            // CRITICAL FIX: The missing chapter harvester. 
+            // CRITICAL FIX: The missing chapter harvester.
             // Now that we found the sources, we must actually pull their chapters!
             if (primaryId > 0) {
                 appScope.launch {
@@ -413,7 +413,7 @@ class MergedMangaManager(
                                 url = ref.mangaUrl
                                 title = ref.mangaTitle ?: ""
                             }
-                            
+
                             val chapters = withTimeoutOrNull(10_000L) {
                                 source.getChapterList(sManga)
                             } ?: emptyList()
