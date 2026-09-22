@@ -53,88 +53,103 @@ class CohesiveCatalogueSource(
 
     override fun getFilterList(): FilterList = FilterList()
 
-    // --- MODERN SUSPEND API (Used by modern Mihon UI & Reader) ---
+    // --- LEGACY RXJAVA API (Required for routing details, chapters, and pages) ---
 
-    override suspend fun getMangaDetails(manga: SManga): SManga {
-        val dbId = manga.url.toLongOrNull() ?: return manga
-        val merged = repository.getMergedMangaById(dbId) ?: return manga
+    @Suppress("DEPRECATION")
+    @Deprecated("Use the 1.x API instead")
+    override fun fetchMangaDetails(manga: SManga): Observable<SManga> {
+        return Observable.fromCallable {
+            val dbId = manga.url.toLongOrNull()
 
-        manga.apply {
-            title = merged.title
-            author = merged.author ?: "Unknown Author"
-            artist = merged.artist ?: "Unknown Artist"
-            description = merged.synopsis ?: "Fetching cohesive metadata in the background..."
-            genre = merged.genres
-            status = when (merged.status?.lowercase()) {
-                "ongoing" -> SManga.ONGOING
-                "completed" -> SManga.COMPLETED
-                "cancelled" -> SManga.CANCELLED
-                "on hiatus" -> SManga.ON_HIATUS
-                else -> SManga.UNKNOWN
+            if (dbId == null) {
+                manga.description = "⚙️ ERROR: URL '${manga.url}' is not a valid Database ID."
+                manga.initialized = true
+                return@fromCallable manga
             }
-            thumbnail_url = merged.coverUrl ?: merged.allCovers().firstOrNull() ?: manga.thumbnail_url
-            initialized = true
+
+            val merged = repository.getMergedMangaById(dbId)
+
+            if (merged == null) {
+                manga.description = "⚙️ ERROR: Database ID $dbId not found in SQLite. Manager failed to save it."
+                manga.initialized = true
+                return@fromCallable manga
+            }
+
+            manga.apply {
+                title = merged.title
+                author = merged.author ?: "Unknown Author"
+                artist = merged.artist ?: "Unknown Artist"
+                description = merged.synopsis ?: "Fetching cohesive metadata in the background..."
+                genre = merged.genres
+                status = when (merged.status?.lowercase()) {
+                    "ongoing" -> SManga.ONGOING
+                    "completed" -> SManga.COMPLETED
+                    "cancelled" -> SManga.CANCELLED
+                    "on hiatus" -> SManga.ON_HIATUS
+                    else -> SManga.UNKNOWN
+                }
+                thumbnail_url = merged.coverUrl ?: merged.allCovers().firstOrNull() ?: manga.thumbnail_url
+                initialized = true
+            }
+            manga
         }
-        return manga
     }
 
-    override suspend fun getChapterList(manga: SManga): List<SChapter> {
-        val dbId = manga.url.toLongOrNull() ?: return emptyList()
-        val dbChapters = repository.getChapters(dbId)
+    @Suppress("DEPRECATION")
+    @Deprecated("Use the 1.x API instead")
+    override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
+        return Observable.fromCallable {
+            val dbId = manga.url.toLongOrNull() ?: return@fromCallable emptyList<SChapter>()
+            val dbChapters = repository.getChapters(dbId)
 
-        if (dbChapters.isEmpty()) {
-            return listOf(
-                SChapter.create().apply {
+            if (dbChapters.isEmpty()) {
+                val dummy = SChapter.create().apply {
                     url = "dummy"
                     name = "⚙️ Background harvester running... Pull to refresh soon."
                     chapter_number = -1f
-                },
-            )
-        }
-
-        return dbChapters.map { ch ->
-            SChapter.create().apply {
-                url = "${ch.sourceId}::||::${ch.url}"
-                name = ch.name
-                chapter_number = ch.chapterNumber
-                date_upload = ch.dateUpload
-                scanlator = ch.language ?: "Multi"
+                }
+                return@fromCallable listOf(dummy)
             }
-        }.sortedByDescending { it.chapter_number }
+
+            dbChapters.map { ch ->
+                SChapter.create().apply {
+                    // CRITICAL FIX: Encode the real source ID into the Chapter URL!
+                    url = "${ch.sourceId}::||::${ch.url}"
+                    name = ch.name
+                    chapter_number = ch.chapterNumber
+                    date_upload = ch.dateUpload
+                    scanlator = ch.language ?: "Multi"
+                }
+            }.sortedByDescending { it.chapter_number }
+        }
     }
 
-    override suspend fun getPageList(chapter: SChapter): List<Page> {
+    // CRITICAL FIX: Route the page request directly to the real extension
+    @Suppress("DEPRECATION")
+    @Deprecated("Use the 1.x API instead")
+    override fun fetchPageList(chapter: SChapter): Observable<List<Page>> {
         val parts = chapter.url.split("::||::")
-        if (parts.size != 2) throw Exception("Invalid merged chapter URL format")
+        if (parts.size != 2) {
+            return Observable.error(Exception("Invalid merged chapter URL format: ${chapter.url}"))
+        }
 
-        val sourceId = parts[0].toLongOrNull() ?: throw Exception("Invalid Source ID")
+        val sourceId = parts[0].toLongOrNull()
+            ?: return Observable.error(Exception("Invalid Source ID in chapter URL"))
+
         val originalUrl = parts[1]
 
         val originalSource = mergedManager.sourceManager.get(sourceId) as? HttpSource
-            ?: throw Exception("Original source extension not found or uninstalled.")
+            ?: return Observable.error(Exception("Original source extension not found or uninstalled."))
 
-        val originalChapter = SChapter.create().apply { url = originalUrl }
-        return originalSource.getPageList(originalChapter)
+        val originalChapter = SChapter.create().apply {
+            url = originalUrl
+        }
+
+        // Forward the request natively!
+        return originalSource.fetchPageList(originalChapter)
     }
 
-    // --- LEGACY RXJAVA API (Required overrides to satisfy the compiler) ---
-
-    @Suppress("DEPRECATION")
-    @Deprecated("Use the 1.x API instead")
-    override fun fetchMangaDetails(manga: SManga): Observable<SManga> =
-        Observable.fromCallable { kotlinx.coroutines.runBlocking { getMangaDetails(manga) } }
-
-    @Suppress("DEPRECATION")
-    @Deprecated("Use the 1.x API instead")
-    override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> =
-        Observable.fromCallable { kotlinx.coroutines.runBlocking { getChapterList(manga) } }
-
-    @Suppress("DEPRECATION")
-    @Deprecated("Use the 1.x API instead")
-    override fun fetchPageList(chapter: SChapter): Observable<List<Page>> =
-        Observable.fromCallable { kotlinx.coroutines.runBlocking { getPageList(chapter) } }
-
-    // --- DUMMY HTTP SOURCE PARSERS (Bypassed by our suspend overrides) ---
+    // --- DUMMY HTTP SOURCE PARSERS (Bypassed by our overrides) ---
     override fun popularMangaRequest(page: Int): Request = Request.Builder().url(baseUrl).build()
     override fun popularMangaParse(response: Response): MangasPage = MangasPage(emptyList(), false)
     override fun searchMangaRequest(
