@@ -4,6 +4,7 @@ package eu.kanade.tachiyomi.data.discovery
 
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -398,7 +399,7 @@ class MergedMangaManager(
         return searchCohesive(title, coverUrl, synopsis, author, malId).primaryId
     }
 
-    // NEW: Background batch chapter harvesting
+    // NEW: Background batch chapter harvesting using legacy RxJava wrapper
     private suspend fun harvestChapters(mergedId: Long) {
         val refs = repository.getReferences(mergedId)
         val semaphore = Semaphore(5) // Max 5 concurrent fetches to avoid Cloudflare bans
@@ -408,14 +409,15 @@ class MergedMangaManager(
                 launch {
                     semaphore.withPermit {
                         try {
-                            val source = sourceManager.get(ref.sourceId) as? CatalogueSource ?: return@withPermit
+                            val source = sourceManager.get(ref.sourceId) ?: return@withPermit
                             val sManga = SManga.create().apply {
                                 url = ref.mangaUrl
                                 title = ref.mangaTitle ?: ""
                             }
 
-                            val chapters = withTimeoutOrNull(10_000L) {
-                                source.getChapterList(sManga)
+                            // Explicit generic type and legacy fetch method to bypass extension issues
+                            val chapters = withTimeoutOrNull<List<SChapter>>(10_000L) {
+                                source.fetchChapterList(sManga).toBlocking().single()
                             } ?: emptyList()
 
                             if (chapters.isNotEmpty()) {
