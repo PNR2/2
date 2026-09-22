@@ -71,7 +71,7 @@ class CohesiveCatalogueSource(
     override fun fetchMangaDetails(manga: SManga): Observable<SManga> {
         return Observable.fromCallable {
             val dbId = manga.url.toLongOrNull()
-            
+
             // DIAGNOSTIC 1: Did the ID pass correctly?
             if (dbId == null) {
                 manga.description = "⚙️ ERROR: URL '${manga.url}' is not a valid Database ID."
@@ -80,7 +80,7 @@ class CohesiveCatalogueSource(
             }
 
             val merged = repository.getMergedMangaById(dbId)
-            
+
             // DIAGNOSTIC 2: Did the Manager actually save it to SQLite?
             if (merged == null) {
                 manga.description = "⚙️ ERROR: Database ID $dbId not found in SQLite. Manager failed to save it."
@@ -114,7 +114,7 @@ class CohesiveCatalogueSource(
         return Observable.fromCallable {
             val dbId = manga.url.toLongOrNull() ?: return@fromCallable emptyList<SChapter>()
             val dbChapters = repository.getChapters(dbId)
-            
+
             // DIAGNOSTIC 3: Show a visual indicator that the app is trying
             if (dbChapters.isEmpty()) {
                 val dummy = SChapter.create().apply {
