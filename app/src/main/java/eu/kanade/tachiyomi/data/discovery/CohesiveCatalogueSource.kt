@@ -22,7 +22,6 @@ class CohesiveCatalogueSource(
     override val lang: String = "multi"
     override val supportsLatest: Boolean = false
 
-    // CRITICAL FIX: Stops the ugly class path from showing in the UI
     override fun toString(): String = name
 
     override suspend fun getPopularManga(page: Int): MangasPage {
@@ -72,7 +71,6 @@ class CohesiveCatalogueSource(
         return Observable.fromCallable {
             val dbId = manga.url.toLongOrNull()
 
-            // DIAGNOSTIC 1: Did the ID pass correctly?
             if (dbId == null) {
                 manga.description = "⚙️ ERROR: URL '${manga.url}' is not a valid Database ID."
                 manga.initialized = true
@@ -81,7 +79,6 @@ class CohesiveCatalogueSource(
 
             val merged = repository.getMergedMangaById(dbId)
 
-            // DIAGNOSTIC 2: Did the Manager actually save it to SQLite?
             if (merged == null) {
                 manga.description = "⚙️ ERROR: Database ID $dbId not found in SQLite. Manager failed to save it."
                 manga.initialized = true
@@ -115,7 +112,6 @@ class CohesiveCatalogueSource(
             val dbId = manga.url.toLongOrNull() ?: return@fromCallable emptyList<SChapter>()
             val dbChapters = repository.getChapters(dbId)
 
-            // DIAGNOSTIC 3: Show a visual indicator that the app is trying
             if (dbChapters.isEmpty()) {
                 val dummy = SChapter.create().apply {
                     url = "dummy"
@@ -127,7 +123,8 @@ class CohesiveCatalogueSource(
 
             dbChapters.map { ch ->
                 SChapter.create().apply {
-                    url = ch.url
+                    // CRITICAL FIX: Encode the real source ID into the Chapter URL!
+                    url = "${ch.sourceId}::||::${ch.url}"
                     name = ch.name
                     chapter_number = ch.chapterNumber
                     date_upload = ch.dateUpload
@@ -137,9 +134,28 @@ class CohesiveCatalogueSource(
         }
     }
 
+    // CRITICAL FIX: Route the page request directly to the real extension
     @Suppress("DEPRECATION")
     @Deprecated("Use the 1.x API instead")
     override fun fetchPageList(chapter: SChapter): Observable<List<Page>> {
-        return Observable.just(emptyList())
+        val parts = chapter.url.split("::||::")
+        if (parts.size != 2) {
+            return Observable.error(Exception("Invalid merged chapter URL format: ${chapter.url}"))
+        }
+
+        val sourceId = parts[0].toLongOrNull()
+            ?: return Observable.error(Exception("Invalid Source ID in chapter URL"))
+        
+        val originalUrl = parts[1]
+
+        val originalSource = mergedManager.sourceManager.get(sourceId) as? CatalogueSource
+            ?: return Observable.error(Exception("Original source extension not found or uninstalled."))
+
+        val originalChapter = SChapter.create().apply {
+            url = originalUrl
+        }
+
+        // Forward the request natively!
+        return originalSource.fetchPageList(originalChapter)
     }
 }
