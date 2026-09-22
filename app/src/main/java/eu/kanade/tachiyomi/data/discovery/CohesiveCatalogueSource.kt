@@ -145,7 +145,7 @@ class CohesiveCatalogueSource(
 
         val sourceId = parts[0].toLongOrNull()
             ?: return Observable.error(Exception("Invalid Source ID in chapter URL"))
-        
+
         val originalUrl = parts[1]
 
         val originalSource = mergedManager.sourceManager.get(sourceId) as? CatalogueSource
