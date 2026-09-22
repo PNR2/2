@@ -34,7 +34,8 @@ import kotlin.coroutines.resumeWithException
  * - Phase 2: Background harvesting for metadata and batched chapter fetching.
  */
 class MergedMangaManager(
-    private val sourceManager: SourceManager,
+    // CRITICAL FIX: Make sourceManager public so the CohesiveCatalogueSource can route pages
+    val sourceManager: SourceManager,
 ) {
 
     private val repository = MergedMangaRepository()
@@ -305,7 +306,6 @@ class MergedMangaManager(
         return searchCohesive(title, coverUrl, synopsis, author, malId).primaryId
     }
 
-    // Safely bridges RxJava to Coroutines
     private suspend fun fetchChaptersSafe(source: CatalogueSource, manga: SManga): List<SChapter> {
         return suspendCancellableCoroutine { continuation ->
             val subscription = source.fetchChapterList(manga)
@@ -364,7 +364,6 @@ class MergedMangaManager(
                                     mergedChapters.size,
                                 )
                             } else {
-                                // Diagnostic: Inject a visual error so we know if a source is blocking us
                                 repository.addChapters(
                                     listOf(
                                         MergedChapter(
@@ -573,8 +572,13 @@ class MergedMangaManager(
             score -= 40
         }
 
-        if (candidate.length > user.length * 2.5 && score < 95) {
-            score -= 10
+        // CRITICAL FIX: Aggressively penalize extremely long subtitle names
+        if (candidate != user && candidate.length > user.length) {
+            val ratio = candidate.length.toFloat() / user.length.toFloat()
+            if (ratio > 1.5f) {
+                // If the candidate is 2x longer than the search, subtract a heavy chunk of points
+                score -= ((ratio - 1.5f) * 25).toInt().coerceAtMost(45)
+            }
         }
 
         return score.coerceIn(0, 100)
