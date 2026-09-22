@@ -373,8 +373,8 @@ class MergedMangaManager(
                                             url = "dummy_error",
                                             name = "⚠️ Failed to fetch from ${source.name}",
                                             chapterNumber = -1f,
-                                        )
-                                    )
+                                        ),
+                                    ),
                                 )
                             }
                         } catch (e: Exception) {
@@ -387,8 +387,8 @@ class MergedMangaManager(
                                         url = "dummy_error",
                                         name = "⚠️ Error fetching from $sourceName: ${e.message}",
                                         chapterNumber = -1f,
-                                    )
-                                )
+                                    ),
+                                ),
                             )
                         }
                     }
