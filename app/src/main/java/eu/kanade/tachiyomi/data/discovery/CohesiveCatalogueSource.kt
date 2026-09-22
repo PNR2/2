@@ -137,7 +137,11 @@ class CohesiveCatalogueSource(
     // --- DUMMY HTTP SOURCE PARSERS (Bypassed by our suspend overrides) ---
     override fun popularMangaRequest(page: Int): Request = Request.Builder().url(baseUrl).build()
     override fun popularMangaParse(response: Response): MangasPage = MangasPage(emptyList(), false)
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = Request.Builder().url(baseUrl).build()
+    override fun searchMangaRequest(
+        page: Int,
+        query: String,
+        filters: FilterList,
+    ): Request = Request.Builder().url(baseUrl).build()
     override fun searchMangaParse(response: Response): MangasPage = MangasPage(emptyList(), false)
     override fun latestUpdatesRequest(page: Int): Request = Request.Builder().url(baseUrl).build()
     override fun latestUpdatesParse(response: Response): MangasPage = MangasPage(emptyList(), false)
