@@ -136,7 +136,9 @@ class MergedMangaRepository {
         }
     }
 
+    // CRITICAL FIX: Allow passing an explicit ID so the Manager can overwrite the Phase 1 shell
     fun createOrUpdateMergedManga(
+        id: Long? = null,
         title: String,
         coverUrl: String? = null,
         coverUrls: List<String>? = null,
@@ -153,8 +155,8 @@ class MergedMangaRepository {
         val now = System.currentTimeMillis()
         val cleanTitle = title.trim()
 
-        var existingId: Long? = null
-        if (malId != null && malId > 0) {
+        var existingId: Long? = id
+        if (malId != null && malId > 0 && existingId == null) {
             val c = db.rawQuery(
                 "SELECT id FROM merged_manga WHERE mal_id = ? LIMIT 1",
                 arrayOf(malId.toString()),
@@ -188,7 +190,7 @@ class MergedMangaRepository {
             put("updated_at", now)
         }
 
-        val id = if (existingId != null) {
+        val finalId = if (existingId != null) {
             db.update("merged_manga", values, "id = ?", arrayOf(existingId.toString()))
             existingId
         } else {
@@ -200,11 +202,12 @@ class MergedMangaRepository {
         }
 
         refreshFlow()
-        return id
+        return finalId
     }
 
     fun createOrUpdateMergedManga(manga: MergedManga): Long {
         return createOrUpdateMergedManga(
+            id = if (manga.id > 0) manga.id else null,
             title = manga.title,
             coverUrl = manga.coverUrl,
             coverUrls = manga.coverUrls,
@@ -219,9 +222,22 @@ class MergedMangaRepository {
         )
     }
 
-    /**
-     * Fill missing metadata from extension details without wiping other fields.
-     */
+    // NEW HELPER: Allows the background engine to find the Phase 1 shell
+    fun getIdByExactTitle(title: String): Long? {
+        try {
+            val c = dbHelper.readableDatabase.rawQuery(
+                "SELECT id FROM merged_manga WHERE LOWER(title) = LOWER(?) LIMIT 1",
+                arrayOf(title.trim()),
+            )
+            var id: Long? = null
+            if (c.moveToFirst()) id = c.getLong(0)
+            c.close()
+            return id
+        } catch (_: Exception) {
+            return null
+        }
+    }
+
     fun updateDetailsIfBlank(
         mergedId: Long,
         author: String? = null,
