@@ -26,11 +26,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Cohesive search — speed-tuned:
- * - English sources first, hard cap on sources
- * - Higher parallelism (16)
- * - Shorter per-source timeout (4s)
- * - One query string when clean == raw
- * - Early primary emit when strong match appears
+ * - Phase 1: Instant shallow shell for immediate UI rendering.
+ * - Phase 2: Background harvesting for metadata and batched chapter fetching.
  */
 class MergedMangaManager(
     private val sourceManager: SourceManager,
@@ -355,6 +352,14 @@ class MergedMangaManager(
 
             val outcome = CohesiveSearchOutcome(primaryId, primaryTitle, similar)
             emit(SearchEvent.Finished(outcome))
+
+            // CRITICAL FIX: The missing chapter harvester. 
+            // Now that we found the sources, we must actually pull their chapters!
+            if (primaryId > 0) {
+                appScope.launch {
+                    harvestChapters(primaryId)
+                }
+            }
         } catch (e: Exception) {
             emit(SearchEvent.Failed(e.message ?: "Search failed"))
         } finally {
@@ -363,6 +368,7 @@ class MergedMangaManager(
         }
     }.flowOn(Dispatchers.IO)
 
+    // CRITICAL FIX: Make the initial search instantly return a shell so the UI never hangs.
     suspend fun searchCohesive(
         query: String,
         coverUrl: String? = null,
@@ -370,13 +376,15 @@ class MergedMangaManager(
         author: String? = null,
         malId: Long? = null,
     ): CohesiveSearchOutcome {
-        var outcome = CohesiveSearchOutcome(-1, query, emptyList())
-        searchCohesiveFlow(query, coverUrl, synopsis, author, malId).collect { event ->
-            if (event is SearchEvent.Finished) {
-                outcome = event.outcome
-            }
-        }
-        return outcome
+        val cleanQuery = query.trim()
+        val id = repository.createOrUpdateMergedManga(
+            title = cleanQuery,
+            coverUrl = coverUrl,
+            synopsis = synopsis,
+            author = author,
+            malId = malId,
+        )
+        return CohesiveSearchOutcome(id, cleanQuery, emptyList())
     }
 
     suspend fun createOrUpdateMergedManga(
@@ -388,6 +396,55 @@ class MergedMangaManager(
         linkSources: Boolean = true,
     ): Long {
         return searchCohesive(title, coverUrl, synopsis, author, malId).primaryId
+    }
+
+    // NEW: Background batch chapter harvesting
+    private suspend fun harvestChapters(mergedId: Long) {
+        val refs = repository.getReferences(mergedId)
+        val semaphore = Semaphore(5) // Max 5 concurrent fetches to avoid Cloudflare bans
+
+        coroutineScope {
+            refs.forEach { ref ->
+                launch {
+                    semaphore.withPermit {
+                        try {
+                            val source = sourceManager.get(ref.sourceId) as? CatalogueSource ?: return@withPermit
+                            val sManga = SManga.create().apply {
+                                url = ref.mangaUrl
+                                title = ref.mangaTitle ?: ""
+                            }
+                            
+                            val chapters = withTimeoutOrNull(10_000L) {
+                                source.getChapterList(sManga)
+                            } ?: emptyList()
+
+                            if (chapters.isNotEmpty()) {
+                                val mergedChapters = chapters.map { ch ->
+                                    MergedChapter(
+                                        mergedId = mergedId,
+                                        sourceId = ref.sourceId,
+                                        url = ch.url,
+                                        name = ch.name,
+                                        chapterNumber = ch.chapter_number,
+                                        language = source.lang,
+                                        dateUpload = ch.date_upload,
+                                    )
+                                }
+                                repository.addChapters(mergedChapters)
+                                repository.updateReferenceChapterCount(
+                                    mergedId,
+                                    ref.sourceId,
+                                    ref.mangaUrl,
+                                    mergedChapters.size,
+                                )
+                            }
+                        } catch (_: Exception) {
+                            // Silently ignore failed sources during harvest
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun collectCovers(
@@ -571,6 +628,7 @@ class MergedMangaManager(
         return score.coerceIn(0, 100)
     }
 
+    // CRITICAL FIX: "dj" and "doujinshi" are now penalized so they don't outscore the main series.
     private fun isNsfwTitle(title: String): Boolean {
         val t = title.lowercase(Locale.ROOT)
         val noise = listOf(
@@ -585,7 +643,10 @@ class MergedMangaManager(
             "explicit",
             "18+",
         )
-        return noise.any { t.contains(it) }
+        if (noise.any { t.contains(it) }) return true
+
+        val tokens = t.split(Regex("\\W+"))
+        return tokens.contains("dj") || tokens.contains("doujinshi")
     }
 
     private fun isEnglishLang(lang: String): Boolean {
