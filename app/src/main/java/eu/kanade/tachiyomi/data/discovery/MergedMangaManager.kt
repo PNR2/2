@@ -128,8 +128,6 @@ class MergedMangaManager(
             val allHits = mutableListOf<SourceHit>()
             val hitMutex = Mutex()
 
-            var primaryId = -1L
-            var primaryKey: String? = null
             var primaryTitle = q
             var primaryCover = coverUrl
             var linkedCount = 0
@@ -152,7 +150,7 @@ class MergedMangaManager(
                 }
 
                 jobs.forEach { deferred ->
-                    val (hits, sourceName) = deferred.await()
+                    val (_, sourceName) = deferred.await()
                     val done = hitMutex.withLock { completed }
 
                     emit(
@@ -162,78 +160,6 @@ class MergedMangaManager(
                             message = "Checked $done/$total · $sourceName",
                         ),
                     )
-
-                    if (hits.isEmpty()) return@forEach
-
-                    val scored = hits.map { hit ->
-                        hit.copy(score = scoreMatch(q, hit.manga, hit.sourceName, hit.lang))
-                    }.filter { it.score >= MIN_SCORE }
-
-                    if (scored.isEmpty()) return@forEach
-
-                    if (primaryId <= 0) {
-                        val best = scored.maxByOrNull { it.score }!!
-                        val qScore = scoreMatch(
-                            q,
-                            SManga.create().apply { title = best.manga.title },
-                            best.sourceName,
-                            best.lang,
-                        )
-                        val nsfw = isNsfwTitle(best.manga.title) && !isNsfwTitle(q)
-                        if (qScore >= PRIMARY_EARLY_SCORE && !nsfw) {
-                            primaryKey = normalizeTitle(best.manga.title)
-                            primaryTitle = best.manga.title
-                            primaryCover = best.manga.thumbnail_url ?: coverUrl
-                            val covers = collectCovers(scored, coverUrl)
-                            primaryId = repository.createOrUpdateMergedManga(
-                                title = primaryTitle,
-                                coverUrl = primaryCover,
-                                coverUrls = covers,
-                                synopsis = synopsis ?: best.manga.description,
-                                author = author ?: best.manga.author,
-                                malId = malId,
-                            )
-                            repository.clearReferences(primaryId)
-                            addHitsAsReferences(primaryId, scored)
-                            linkedCount = repository.getReferences(primaryId).size
-                            emit(
-                                SearchEvent.PrimaryReady(
-                                    id = primaryId,
-                                    title = primaryTitle,
-                                    coverUrl = primaryCover,
-                                    sourceCount = linkedCount,
-                                ),
-                            )
-                        }
-                    } else if (primaryKey != null) {
-                        val matching = scored.filter {
-                            normalizeTitle(it.manga.title) == primaryKey ||
-                                isNearDuplicateTitle(
-                                    normalizeTitle(it.manga.title),
-                                    primaryKey!!,
-                                )
-                        }
-                        if (matching.isNotEmpty()) {
-                            addHitsAsReferences(primaryId, matching, clearFirst = false)
-                            linkedCount = repository.getReferences(primaryId).size
-                            val covers = collectCovers(matching, primaryCover ?: coverUrl)
-                            val newPrimary = primaryCover
-                                ?: matching.mapNotNull { it.manga.thumbnail_url }
-                                    .firstOrNull { it.isNotBlank() }
-                            if (!newPrimary.isNullOrBlank()) {
-                                primaryCover = newPrimary
-                            }
-                            repository.createOrUpdateMergedManga(
-                                title = primaryTitle,
-                                coverUrl = primaryCover,
-                                coverUrls = covers,
-                                synopsis = synopsis,
-                                author = author,
-                                malId = malId,
-                            )
-                            emit(SearchEvent.SourcesUpdated(primaryId, linkedCount))
-                        }
-                    }
                 }
             }
 
@@ -270,60 +196,41 @@ class MergedMangaManager(
                         .thenByDescending { it.bestScore },
                 )
 
-            if (primaryId <= 0) {
-                val primaryCluster = clusters
-                    .firstOrNull { !it.isNsfw && it.queryScore >= PRIMARY_MIN_QUERY_SCORE }
-                    ?: clusters.firstOrNull { !it.isNsfw }
-                    ?: clusters.firstOrNull()
+            // CRITICAL FIX: Find the shell ID from Phase 1 so we can overwrite it!
+            val shellId = repository.getIdByExactTitle(q)
+            var finalPrimaryId = -1L
 
-                if (primaryCluster != null) {
-                    primaryId = saveClusterAsMerged(
-                        cluster = primaryCluster,
-                        fallbackTitle = q,
-                        coverUrl = coverUrl ?: primaryCluster.bestCover,
-                        synopsis = synopsis,
-                        author = author,
-                        malId = malId,
-                        linkSources = true,
-                    )
-                    primaryTitle = primaryCluster.displayTitle
-                    primaryCover = coverUrl ?: primaryCluster.bestCover
-                    linkedCount = repository.getReferences(primaryId).size
-                    emit(
-                        SearchEvent.PrimaryReady(
-                            id = primaryId,
-                            title = primaryTitle,
-                            coverUrl = primaryCover,
-                            sourceCount = linkedCount,
-                        ),
-                    )
-                } else {
-                    primaryId = repository.createOrUpdateMergedManga(
-                        title = q,
-                        coverUrl = coverUrl,
-                        coverUrls = listOfNotNull(coverUrl),
-                        synopsis = synopsis,
-                        author = author,
-                        malId = malId,
-                    )
-                    emit(SearchEvent.PrimaryReady(primaryId, q, coverUrl, 0))
-                }
-            } else {
-                val keyOfPrimary = primaryKey ?: normalizeTitle(primaryTitle)
-                val fullPrimary = clusters.firstOrNull { it.key == keyOfPrimary }
-                if (fullPrimary != null) {
-                    primaryId = saveClusterAsMerged(
-                        cluster = fullPrimary,
-                        fallbackTitle = q,
-                        coverUrl = coverUrl ?: fullPrimary.bestCover ?: primaryCover,
-                        synopsis = synopsis,
-                        author = author,
-                        malId = malId,
-                        linkSources = true,
-                    )
-                    linkedCount = repository.getReferences(primaryId).size
-                    emit(SearchEvent.SourcesUpdated(primaryId, linkedCount))
-                }
+            val primaryCluster = clusters
+                .firstOrNull { !it.isNsfw && it.queryScore >= PRIMARY_MIN_QUERY_SCORE }
+                ?: clusters.firstOrNull { !it.isNsfw }
+                ?: clusters.firstOrNull()
+
+            if (primaryCluster != null) {
+                // Save the best cluster OVERWRITING the shell ID!
+                finalPrimaryId = saveClusterAsMerged(
+                    existingId = shellId,
+                    cluster = primaryCluster,
+                    fallbackTitle = q,
+                    coverUrl = coverUrl ?: primaryCluster.bestCover,
+                    synopsis = synopsis,
+                    author = author,
+                    malId = malId,
+                    linkSources = true,
+                )
+                primaryTitle = primaryCluster.displayTitle
+                primaryCover = coverUrl ?: primaryCluster.bestCover
+                linkedCount = repository.getReferences(finalPrimaryId).size
+                emit(
+                    SearchEvent.PrimaryReady(
+                        id = finalPrimaryId,
+                        title = primaryTitle,
+                        coverUrl = primaryCover,
+                        sourceCount = linkedCount,
+                    ),
+                )
+            } else if (shellId != null) {
+                // Fallback to the shell if no good clusters were found
+                finalPrimaryId = shellId
             }
 
             val primaryNorm = normalizeTitle(primaryTitle)
@@ -335,6 +242,7 @@ class MergedMangaManager(
                 .take(MAX_SIMILAR)
                 .map { cluster ->
                     val id = saveClusterAsMerged(
+                        existingId = null,
                         cluster = cluster,
                         fallbackTitle = cluster.displayTitle,
                         coverUrl = cluster.bestCover,
@@ -351,14 +259,12 @@ class MergedMangaManager(
                 emit(SearchEvent.SimilarReady(similar))
             }
 
-            val outcome = CohesiveSearchOutcome(primaryId, primaryTitle, similar)
+            val outcome = CohesiveSearchOutcome(finalPrimaryId, primaryTitle, similar)
             emit(SearchEvent.Finished(outcome))
 
-            // CRITICAL FIX: The missing chapter harvester.
-            // Now that we found the sources, we must actually pull their chapters!
-            if (primaryId > 0) {
+            if (finalPrimaryId > 0) {
                 appScope.launch {
-                    harvestChapters(primaryId)
+                    harvestChapters(finalPrimaryId)
                 }
             }
         } catch (e: Exception) {
@@ -369,7 +275,6 @@ class MergedMangaManager(
         }
     }.flowOn(Dispatchers.IO)
 
-    // CRITICAL FIX: Make the initial search instantly return a shell so the UI never hangs.
     suspend fun searchCohesive(
         query: String,
         coverUrl: String? = null,
@@ -379,6 +284,7 @@ class MergedMangaManager(
     ): CohesiveSearchOutcome {
         val cleanQuery = query.trim()
         val id = repository.createOrUpdateMergedManga(
+            id = null,
             title = cleanQuery,
             coverUrl = coverUrl,
             synopsis = synopsis,
@@ -399,10 +305,9 @@ class MergedMangaManager(
         return searchCohesive(title, coverUrl, synopsis, author, malId).primaryId
     }
 
-    // NEW: Background batch chapter harvesting using legacy RxJava wrapper
     private suspend fun harvestChapters(mergedId: Long) {
         val refs = repository.getReferences(mergedId)
-        val semaphore = Semaphore(5) // Max 5 concurrent fetches to avoid Cloudflare bans
+        val semaphore = Semaphore(5)
 
         coroutineScope {
             refs.forEach { ref ->
@@ -415,9 +320,8 @@ class MergedMangaManager(
                                 title = ref.mangaTitle ?: ""
                             }
 
-                            // Explicit generic type and legacy fetch method to bypass extension issues
-                            val chapters = withTimeoutOrNull<List<SChapter>>(10_000L) {
-                                source.fetchChapterList(sManga).toBlocking().single()
+                            val chapters = withTimeoutOrNull<List<SChapter>>(15_000L) {
+                                source.fetchChapterList(sManga).toBlocking().firstOrDefault(emptyList())
                             } ?: emptyList()
 
                             if (chapters.isNotEmpty()) {
@@ -441,7 +345,6 @@ class MergedMangaManager(
                                 )
                             }
                         } catch (_: Exception) {
-                            // Silently ignore failed sources during harvest
                         }
                     }
                 }
@@ -503,6 +406,7 @@ class MergedMangaManager(
     }
 
     private fun saveClusterAsMerged(
+        existingId: Long?,
         cluster: TitleCluster,
         fallbackTitle: String,
         coverUrl: String?,
@@ -518,6 +422,7 @@ class MergedMangaManager(
         val covers = collectCovers(cluster.hits, resolvedCover)
 
         val mergedId = repository.createOrUpdateMergedManga(
+            id = existingId,
             title = cluster.displayTitle.ifBlank { fallbackTitle }.trim(),
             coverUrl = resolvedCover,
             coverUrls = covers,
@@ -630,7 +535,6 @@ class MergedMangaManager(
         return score.coerceIn(0, 100)
     }
 
-    // CRITICAL FIX: "dj" and "doujinshi" are now penalized so they don't outscore the main series.
     private fun isNsfwTitle(title: String): Boolean {
         val t = title.lowercase(Locale.ROOT)
         val noise = listOf(
@@ -727,13 +631,8 @@ class MergedMangaManager(
         private const val MAX_SIMILAR = 6
         private const val MAX_COVERS = 12
 
-        /** Cap how many extensions we hit (English sorted first). */
         private const val MAX_SEARCH_SOURCES = 35
-
-        /** Parallel searches at once. */
         private const val PARALLELISM = 16
-
-        /** Per-extension search timeout. */
         private const val SOURCE_TIMEOUT_MS = 4_000L
 
         private val runningJobs = ConcurrentHashMap<String, Job>()
