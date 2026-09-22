@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -24,6 +25,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import tachiyomi.domain.source.service.SourceManager
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Cohesive search — speed-tuned:
@@ -196,7 +199,6 @@ class MergedMangaManager(
                         .thenByDescending { it.bestScore },
                 )
 
-            // CRITICAL FIX: Find the shell ID from Phase 1 so we can overwrite it!
             val shellId = repository.getIdByExactTitle(q)
             var finalPrimaryId = -1L
 
@@ -206,7 +208,6 @@ class MergedMangaManager(
                 ?: clusters.firstOrNull()
 
             if (primaryCluster != null) {
-                // Save the best cluster OVERWRITING the shell ID!
                 finalPrimaryId = saveClusterAsMerged(
                     existingId = shellId,
                     cluster = primaryCluster,
@@ -229,7 +230,6 @@ class MergedMangaManager(
                     ),
                 )
             } else if (shellId != null) {
-                // Fallback to the shell if no good clusters were found
                 finalPrimaryId = shellId
             }
 
@@ -305,6 +305,26 @@ class MergedMangaManager(
         return searchCohesive(title, coverUrl, synopsis, author, malId).primaryId
     }
 
+    // Safely bridges RxJava to Coroutines
+    private suspend fun fetchChaptersSafe(source: CatalogueSource, manga: SManga): List<SChapter> {
+        return suspendCancellableCoroutine { continuation ->
+            val subscription = source.fetchChapterList(manga)
+                .subscribe(
+                    { chapters ->
+                        if (continuation.isActive) {
+                            continuation.resume(chapters)
+                        }
+                    },
+                    { error ->
+                        if (continuation.isActive) {
+                            continuation.resumeWithException(error)
+                        }
+                    },
+                )
+            continuation.invokeOnCancellation { subscription.unsubscribe() }
+        }
+    }
+
     private suspend fun harvestChapters(mergedId: Long) {
         val refs = repository.getReferences(mergedId)
         val semaphore = Semaphore(5)
@@ -314,14 +334,14 @@ class MergedMangaManager(
                 launch {
                     semaphore.withPermit {
                         try {
-                            val source = sourceManager.get(ref.sourceId) ?: return@withPermit
+                            val source = sourceManager.get(ref.sourceId) as? CatalogueSource ?: return@withPermit
                             val sManga = SManga.create().apply {
                                 url = ref.mangaUrl
                                 title = ref.mangaTitle ?: ""
                             }
 
-                            val chapters = withTimeoutOrNull<List<SChapter>>(15_000L) {
-                                source.fetchChapterList(sManga).toBlocking().firstOrDefault(emptyList())
+                            val chapters = withTimeoutOrNull(20_000L) {
+                                fetchChaptersSafe(source, sManga)
                             } ?: emptyList()
 
                             if (chapters.isNotEmpty()) {
@@ -343,8 +363,33 @@ class MergedMangaManager(
                                     ref.mangaUrl,
                                     mergedChapters.size,
                                 )
+                            } else {
+                                // Diagnostic: Inject a visual error so we know if a source is blocking us
+                                repository.addChapters(
+                                    listOf(
+                                        MergedChapter(
+                                            mergedId = mergedId,
+                                            sourceId = ref.sourceId,
+                                            url = "dummy_error",
+                                            name = "⚠️ Failed to fetch from ${source.name}",
+                                            chapterNumber = -1f,
+                                        )
+                                    )
+                                )
                             }
-                        } catch (_: Exception) {
+                        } catch (e: Exception) {
+                            val sourceName = (sourceManager.get(ref.sourceId) as? CatalogueSource)?.name ?: "Source"
+                            repository.addChapters(
+                                listOf(
+                                    MergedChapter(
+                                        mergedId = mergedId,
+                                        sourceId = ref.sourceId,
+                                        url = "dummy_error",
+                                        name = "⚠️ Error fetching from $sourceName: ${e.message}",
+                                        chapterNumber = -1f,
+                                    )
+                                )
+                            )
                         }
                     }
                 }
