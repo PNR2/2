@@ -279,9 +279,9 @@ class MergedMangaManager(
         malId: Long? = null,
     ): CohesiveSearchOutcome {
         val q = query.trim()
-        
+
         // 1. Instantly generate the SQLite shell
-        val shellId = repository.getIdByExactTitle(q) 
+        val shellId = repository.getIdByExactTitle(q)
             ?: repository.createOrUpdateMergedManga(
                 title = q,
                 coverUrl = coverUrl,
@@ -387,8 +387,8 @@ class MergedMangaManager(
                                             url = "dummy_error",
                                             name = "⚠️ Failed to fetch from ${source.name}",
                                             chapterNumber = -1f,
-                                        )
-                                    )
+                                        ),
+                                    ),
                                 )
                             }
                         } catch (e: Exception) {
@@ -401,8 +401,8 @@ class MergedMangaManager(
                                         url = "dummy_error",
                                         name = "⚠️ Error fetching from $sourceName: ${e.message}",
                                         chapterNumber = -1f,
-                                    )
-                                )
+                                    ),
+                                ),
                             )
                         }
                     }
