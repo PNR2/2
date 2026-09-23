@@ -28,13 +28,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/**
- * Cohesive search — speed-tuned:
- * - Phase 1: Instant shallow shell for immediate UI rendering.
- * - Phase 2: Background harvesting for metadata and batched chapter fetching.
- */
 class MergedMangaManager(
-    // CRITICAL FIX: Make sourceManager public so the CohesiveCatalogueSource can route pages
     val sourceManager: SourceManager,
 ) {
 
@@ -276,6 +270,7 @@ class MergedMangaManager(
         }
     }.flowOn(Dispatchers.IO)
 
+    // CRITICAL FIX: The missing link. Wait dynamically for a cover before rendering!
     suspend fun searchCohesive(
         query: String,
         coverUrl: String? = null,
@@ -283,16 +278,36 @@ class MergedMangaManager(
         author: String? = null,
         malId: Long? = null,
     ): CohesiveSearchOutcome {
-        val cleanQuery = query.trim()
-        val id = repository.createOrUpdateMergedManga(
-            id = null,
-            title = cleanQuery,
-            coverUrl = coverUrl,
-            synopsis = synopsis,
-            author = author,
-            malId = malId,
-        )
-        return CohesiveSearchOutcome(id, cleanQuery, emptyList())
+        val q = query.trim()
+        
+        // 1. Instantly generate the SQLite shell
+        val shellId = repository.getIdByExactTitle(q) 
+            ?: repository.createOrUpdateMergedManga(
+                title = q,
+                coverUrl = coverUrl,
+                synopsis = synopsis,
+                author = author,
+                malId = malId,
+            )
+
+        // 2. Trigger the background engine to find the real sources and covers
+        ensureBackground(this, q)
+
+        // 3. Poll for up to 2.5 seconds to see if the background engine found a cover
+        var loops = 0
+        while (loops < 25) {
+            val merged = repository.getMergedMangaById(shellId)
+            if (merged != null && !merged.coverUrl.isNullOrBlank()) {
+                return CohesiveSearchOutcome(shellId, merged.title, emptyList())
+            }
+            kotlinx.coroutines.delay(100)
+            loops++
+        }
+
+        // 4. Fallback if the internet is slow or nothing was found
+        val finalMerged = repository.getMergedMangaById(shellId)
+        val finalTitle = finalMerged?.title ?: q
+        return CohesiveSearchOutcome(shellId, finalTitle, emptyList())
     }
 
     suspend fun createOrUpdateMergedManga(
@@ -372,8 +387,8 @@ class MergedMangaManager(
                                             url = "dummy_error",
                                             name = "⚠️ Failed to fetch from ${source.name}",
                                             chapterNumber = -1f,
-                                        ),
-                                    ),
+                                        )
+                                    )
                                 )
                             }
                         } catch (e: Exception) {
@@ -386,8 +401,8 @@ class MergedMangaManager(
                                         url = "dummy_error",
                                         name = "⚠️ Error fetching from $sourceName: ${e.message}",
                                         chapterNumber = -1f,
-                                    ),
-                                ),
+                                    )
+                                )
                             )
                         }
                     }
@@ -572,11 +587,9 @@ class MergedMangaManager(
             score -= 40
         }
 
-        // CRITICAL FIX: Aggressively penalize extremely long subtitle names
         if (candidate != user && candidate.length > user.length) {
             val ratio = candidate.length.toFloat() / user.length.toFloat()
             if (ratio > 1.5f) {
-                // If the candidate is 2x longer than the search, subtract a heavy chunk of points
                 score -= ((ratio - 1.5f) * 25).toInt().coerceAtMost(45)
             }
         }
